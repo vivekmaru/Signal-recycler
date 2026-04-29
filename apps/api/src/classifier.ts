@@ -89,7 +89,6 @@ function heuristicClassify(input: {
   items: unknown[];
 }): ClassifierResult {
   const text = `${input.prompt}\n${input.finalResponse}`;
-  const lower = text.toLowerCase();
   const signal: string[] = [];
   const noise: string[] = [];
   const failure: string[] = [];
@@ -100,16 +99,41 @@ function heuristicClassify(input: {
     signal.push("The turn contains a correction or constraint discovery worth preserving.");
   }
 
-  // Detect command/tool failures that led to a correction
-  const failurePatterns: Array<{ pattern: RegExp; category: string; extract: (m: RegExpMatchArray) => string | null }> = [
+  // Token matcher for a tool name, possibly wrapped in `backticks`, 'quotes',
+  // or "double quotes", and possibly followed by a sub-command word like
+  // "test" (e.g. `pnpm test`). Captures the FIRST word — the tool name.
+  // Used inside larger regexes via interpolation.
+  const TOK = `[\`'"]?(\\w[\\w.-]*)(?:\\s+\\w[\\w.-]*)?[\`'"]?`;
+
+  // Detect command/tool corrections in natural-language Codex output.
+  const failurePatterns: Array<{
+    pattern: RegExp;
+    category: string;
+    extract: (m: RegExpMatchArray) => string | null;
+  }> = [
     {
-      // "use X instead of Y" — explicit replacement
-      pattern: /use (\w+) instead of (\w+)/i,
+      // "use pnpm instead of npm" or "use `pnpm test` instead of `npm test`"
+      pattern: new RegExp(`\\buse ${TOK}\\s+instead of\\s+${TOK}`, "i"),
       category: "tooling",
       extract: (m) => `Use ${m[1]} instead of ${m[2]} for operations in this repo.`
     },
     {
-      // "corrected (me) to use X instead" — implicit correction with ellipsis between tokens
+      // "invoked/called/executed/run/started by X instead of Y"
+      pattern: new RegExp(
+        `(?:invoked|called|executed|run|started) by ${TOK}\\s+instead of\\s+${TOK}`,
+        "i"
+      ),
+      category: "tooling",
+      extract: (m) => `Use ${m[2]} instead of ${m[1]} — the project rejects ${m[1]}-driven execution.`
+    },
+    {
+      // "X-driven execution" / "only accepts Y-driven" — hard rejection echo.
+      pattern: new RegExp(`only accepts [\`'"]?(\\w[\\w.-]*)[\`'"]?-driven`, "i"),
+      category: "tooling",
+      extract: (m) => `This project only accepts ${m[1]}-driven script execution.`
+    },
+    {
+      // "corrected (me) to use X instead"
       pattern: /corrected .{0,20}use (\w+(?:\s\w+)*?) instead/i,
       category: "tooling",
       extract: (m) => `Use ${m[1]?.trim()} — a previous attempt with an alternative was corrected.`
@@ -124,22 +148,24 @@ function heuristicClassify(input: {
       category: "convention",
       extract: (m) => `Project convention: must ${m[1]?.trim()}.`
     }
-  ]
+  ];
 
+  const seenRules = new Set<string>();
   for (const { pattern, category, extract } of failurePatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      const rule = extract(match)
-      if (rule) {
-        failure.push(`Detected a correctable failure pattern: "${match[0]}".`)
-        candidateRules.push({
-          category,
-          rule,
-          reason: `Extracted from Codex turn: "${match[0]}".`,
-          confidence: "high"
-        })
-      }
-    }
+    const match = text.match(pattern);
+    if (!match) continue;
+    const rule = extract(match);
+    if (!rule) continue;
+    const key = rule.toLowerCase();
+    if (seenRules.has(key)) continue;
+    seenRules.add(key);
+    failure.push(`Detected a correctable failure pattern: "${match[0]}".`);
+    candidateRules.push({
+      category,
+      rule,
+      reason: `Extracted from Codex turn: "${match[0]}".`,
+      confidence: "high"
+    });
   }
 
   // Only mark "failure" when we actually extracted a candidate rule from it.
