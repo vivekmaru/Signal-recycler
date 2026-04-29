@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
+import { createCodexRunner } from "./codexRunner.js";
 import { createStore } from "./store.js";
 
 const TEST_APP_OPTIONS = {
@@ -9,6 +10,7 @@ const TEST_APP_OPTIONS = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("api", () => {
@@ -185,5 +187,29 @@ describe("api", () => {
     expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
       injectedRules: 1
     });
+  });
+
+  it("does not emit standalone proxy injection events from the Codex runner", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const store = createStore(":memory:");
+    const rule = store.createRuleCandidate({
+      projectId: TEST_APP_OPTIONS.projectId,
+      category: "theme",
+      rule: "Use the approved theme tokens.",
+      reason: "Manual demo rule."
+    });
+    store.approveRule(rule.id);
+    const runner = createCodexRunner({
+      store,
+      apiPort: 3001,
+      projectId: TEST_APP_OPTIONS.projectId,
+      workingDirectory: TEST_APP_OPTIONS.workingDirectory
+    });
+
+    await runner.run({ sessionId: "codex-runner", prompt: "Apply the theme." });
+    const events = store.listEvents("codex-runner");
+
+    expect(events.map((event) => event.category)).toEqual(["proxy_request"]);
+    expect(events[0]?.metadata).toMatchObject({ approvedRulesAvailable: 1 });
   });
 });

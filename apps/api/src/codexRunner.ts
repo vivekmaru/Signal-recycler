@@ -31,15 +31,6 @@ export function createCodexRunner(input: {
         body: `Running in ${effectiveDir} — Signal Recycler will intercept and compress traffic before Codex sees it.`,
         metadata: { approvedRulesAvailable: rules.length, workingDirectory: effectiveDir }
       });
-      if (rules.length > 0) {
-        input.store.createEvent({
-          sessionId,
-          category: "proxy_injection",
-          title: "Approved playbook rules injected",
-          body: `${rules.length} durable rule(s) prepended to the Codex turn.`,
-          metadata: { ruleIds: rules.map((rule) => rule.id) }
-        });
-      }
 
       if (process.env.SIGNAL_RECYCLER_MOCK_CODEX === "1") {
         const injected = injectPlaybookRules(prompt, rules);
