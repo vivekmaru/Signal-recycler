@@ -28,6 +28,19 @@ export async function listRules(): Promise<PlaybookRule[]> {
   return readJson(await fetch("/api/rules"));
 }
 
+export async function createManualRule(input: {
+  category: string;
+  rule: string;
+  reason: string;
+}): Promise<PlaybookRule> {
+  const response = await fetch("/api/rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return readJson(response);
+}
+
 export async function listEvents(sessionId: string): Promise<TimelineEvent[]> {
   return readJson(await fetch(`/api/sessions/${sessionId}/events`));
 }

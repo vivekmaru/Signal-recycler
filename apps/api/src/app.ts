@@ -3,6 +3,7 @@ import path from "node:path";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
+  createManualRuleRequestSchema,
   createSessionRequestSchema,
   runRequestSchema
 } from "@signal-recycler/shared";
@@ -326,6 +327,18 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get("/api/rules", async () => options.store.listRules(projectId));
 
+  app.post("/api/rules", async (request) => {
+    const parsed = createManualRuleRequestSchema.parse(request.body ?? {});
+    const rule = options.store.createRuleCandidate({
+      projectId,
+      category: parsed.category,
+      rule: parsed.rule,
+      reason: parsed.reason,
+      sourceEventId: null
+    });
+    return options.store.approveRule(rule.id);
+  });
+
   app.post("/api/rules/:id/approve", async (request) => {
     const { id } = request.params as { id: string };
     return options.store.approveRule(id);
@@ -419,16 +432,6 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
         ruleIds: rules.map((r) => r.id)
       }
     });
-    if (rules.length > 0) {
-      options.store.createEvent({
-        sessionId,
-        category: "proxy_injection",
-        title: `Injected ${rules.length} playbook rule${rules.length === 1 ? "" : "s"}`,
-        body: rules.map((r, i) => `${i + 1}. [${r.category}] ${r.rule}`).join("\n"),
-        metadata: { ruleIds: rules.map((rule) => rule.id) }
-      });
-    }
-
     const headers = new Headers();
     for (const [key, value] of Object.entries(request.headers)) {
       if (!value || shouldDropRequestHeader(key)) continue;

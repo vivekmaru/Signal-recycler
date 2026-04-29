@@ -63,6 +63,34 @@ describe("api", () => {
     );
   });
 
+  it("creates a manually approved playbook rule", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/rules",
+      payload: {
+        category: "frontend",
+        rule: "For frontend tasks, never modify apps/api unless explicitly asked.",
+        reason: "Manual guardrail before running a broad UI prompt."
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "approved",
+      category: "frontend",
+      rule: "For frontend tasks, never modify apps/api unless explicitly asked.",
+      reason: "Manual guardrail before running a broad UI prompt."
+    });
+  });
+
   it("returns a clear gateway error when the Codex runner fails", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
@@ -118,5 +146,44 @@ describe("api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true });
+  });
+
+  it("records injection metadata on proxy requests without a standalone proxy injection event", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    );
+    const store = createStore(":memory:");
+    const manualRule = store.createRuleCandidate({
+      projectId: TEST_APP_OPTIONS.projectId,
+      category: "tooling",
+      rule: "Use pnpm for package scripts.",
+      reason: "Manual setup rule."
+    });
+    store.approveRule(manualRule.id);
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy"
+      },
+      payload: JSON.stringify({ input: "hello" })
+    });
+    const events = store.listEvents("proxy");
+
+    expect(response.statusCode).toBe(200);
+    expect(events.map((event) => event.category)).not.toContain("proxy_injection");
+    expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
+      injectedRules: 1
+    });
   });
 });

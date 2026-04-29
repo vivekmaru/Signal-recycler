@@ -74,3 +74,9 @@ export const runRequestSchema = z.object({
 export const createSessionRequestSchema = z.object({
   title: z.string().min(1).optional()
 });
+
+export const createManualRuleRequestSchema = z.object({
+  category: z.string().min(2),
+  rule: z.string().min(8),
+  reason: z.string().min(8)
+});

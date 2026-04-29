@@ -18,6 +18,7 @@ import {
   type ApiConfig,
   type DemoRunResult,
   approveRule,
+  createManualRule,
   createSession,
   exportPlaybook,
   fetchConfig,
@@ -45,6 +46,12 @@ export function App() {
   const [demoResult, setDemoResult] = useState<DemoRunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exported, setExported] = useState<string>("");
+  const [manualRuleOpen, setManualRuleOpen] = useState(false);
+  const [manualRuleForm, setManualRuleForm] = useState({
+    category: "guardrail",
+    rule: "",
+    reason: ""
+  });
   const lastEventCountRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -164,6 +171,23 @@ export function App() {
     if (action === "approve") await approveRule(id);
     else await rejectRule(id);
     await refresh();
+  }
+
+  async function handleCreateManualRule(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await createManualRule({
+        category: manualRuleForm.category.trim(),
+        rule: manualRuleForm.rule.trim(),
+        reason: manualRuleForm.reason.trim()
+      });
+      setManualRuleForm({ category: "guardrail", rule: "", reason: "" });
+      setManualRuleOpen(false);
+      await refresh();
+    } catch (manualRuleError) {
+      setError((manualRuleError as Error).message);
+    }
   }
 
   async function handleExport() {
@@ -319,8 +343,28 @@ export function App() {
                     : "Approved rules are injected into every future Codex turn."}
                 </p>
               </div>
-              <Sparkles className="text-[#9db92d]" size={22} />
+              <button
+                className="icon-button"
+                aria-label="Add manual playbook rule"
+                title="Add rule"
+                onClick={() => setManualRuleOpen((open) => !open)}
+              >
+                <Sparkles size={16} />
+              </button>
             </div>
+            {manualRuleOpen ? (
+              <ManualRuleForm
+                form={manualRuleForm}
+                setForm={setManualRuleForm}
+                onCancel={() => setManualRuleOpen(false)}
+                onSubmit={handleCreateManualRule}
+              />
+            ) : (
+              <button className="secondary-button justify-center" onClick={() => setManualRuleOpen(true)}>
+                <Sparkles size={15} />
+                Add rule
+              </button>
+            )}
             <RuleGroup
               title="Pending"
               rules={rules.filter((r) => r.status === "pending")}
@@ -607,7 +651,6 @@ function chipStyleForCategory(category: string): {
         dotClass: "bg-[#f59e0b]",
         icon: <Zap size={10} />
       };
-    case "proxy_injection":
     case "rule_auto_approved":
       return {
         chipClass:
@@ -624,6 +667,76 @@ function chipStyleForCategory(category: string): {
     default:
       return { chipClass: "event-chip", dotClass: "", icon: null };
   }
+}
+
+function ManualRuleForm({
+  form,
+  setForm,
+  onSubmit,
+  onCancel
+}: {
+  form: { category: string; rule: string; reason: string };
+  setForm: React.Dispatch<
+    React.SetStateAction<{ category: string; rule: string; reason: string }>
+  >;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => Promise<void>;
+  onCancel: () => void;
+}) {
+  return (
+    <form className="rounded border border-[#d7d0c2] bg-[#fffdf7] p-3" onSubmit={(event) => void onSubmit(event)}>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase text-[#66706c]">Add approved rule</h3>
+        <button className="icon-button" type="button" aria-label="Cancel add rule" onClick={onCancel}>
+          <X size={14} />
+        </button>
+      </div>
+      <label className="mb-2 block text-xs font-semibold uppercase text-[#66706c]" htmlFor="manual-rule-category">
+        Category
+      </label>
+      <input
+        id="manual-rule-category"
+        className="mb-3 w-full rounded border border-[#cfc6b5] bg-white px-3 py-2 text-sm outline-none focus:border-[#1d2528]"
+        value={form.category}
+        onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
+        placeholder="guardrail"
+        required
+        minLength={2}
+      />
+      <label className="mb-2 block text-xs font-semibold uppercase text-[#66706c]" htmlFor="manual-rule-rule">
+        Rule
+      </label>
+      <textarea
+        id="manual-rule-rule"
+        className="mb-3 min-h-20 w-full resize-none rounded border border-[#cfc6b5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#1d2528]"
+        value={form.rule}
+        onChange={(event) => setForm((current) => ({ ...current, rule: event.target.value }))}
+        placeholder="For frontend tasks, never modify apps/api unless explicitly asked."
+        required
+        minLength={8}
+      />
+      <label className="mb-2 block text-xs font-semibold uppercase text-[#66706c]" htmlFor="manual-rule-reason">
+        Reason
+      </label>
+      <textarea
+        id="manual-rule-reason"
+        className="mb-3 min-h-16 w-full resize-none rounded border border-[#cfc6b5] bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-[#1d2528]"
+        value={form.reason}
+        onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
+        placeholder="This is a deliberate repo boundary, not something Codex should infer from failure."
+        required
+        minLength={8}
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <button className="secondary-button justify-center" type="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="primary-button justify-center py-2" type="submit">
+          <Sparkles size={15} />
+          Add rule
+        </button>
+      </div>
+    </form>
+  );
 }
 
 function RuleGroup({
