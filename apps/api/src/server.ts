@@ -11,16 +11,32 @@ loadDotEnv(path.resolve(process.cwd(), ".env"));
 configureHttpRuntime();
 
 const port = Number(process.env.PORT ?? 3001);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const dbPath = process.env.SIGNAL_RECYCLER_DB ?? path.join(root, "signal-recycler.sqlite");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const dbPath = process.env.SIGNAL_RECYCLER_DB ?? path.join(repoRoot, "signal-recycler.sqlite");
+
+// Which directory Codex should work in. Defaults to the repo root so Signal
+// Recycler can demo on itself — set SIGNAL_RECYCLER_WORKDIR to point at any
+// other project you want to run Codex against.
+const workingDirectory = process.env.SIGNAL_RECYCLER_WORKDIR
+  ? path.resolve(process.env.SIGNAL_RECYCLER_WORKDIR)
+  : repoRoot;
+
+// Logical project name used to namespace rules and sessions in the DB.
+const projectId =
+  process.env.SIGNAL_RECYCLER_PROJECT_ID ?? path.basename(workingDirectory);
+
 const store = createStore(dbPath);
 const app = await createApp({
   store,
-  codexRunner: createCodexRunner({ store, apiPort: port })
+  projectId,
+  workingDirectory,
+  codexRunner: createCodexRunner({ store, apiPort: port, projectId, workingDirectory })
 });
 
 await app.listen({ port, host: "127.0.0.1" });
 console.log(`Signal Recycler API listening on http://127.0.0.1:${port}`);
+console.log(`  Project:   ${projectId}`);
+console.log(`  Workdir:   ${workingDirectory}`);
 
 function loadDotEnv(filePath: string): void {
   if (!fs.existsSync(filePath)) return;

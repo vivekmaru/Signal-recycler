@@ -172,14 +172,14 @@ export function createStore(path: string) {
       return row ? mapRule(row) : null;
     },
 
-    listRules(projectId = "demo-repo"): PlaybookRule[] {
+    listRules(projectId: string): PlaybookRule[] {
       return db
         .prepare("SELECT * FROM rules WHERE project_id = ? ORDER BY created_at DESC")
         .all(projectId)
         .map(mapRule);
     },
 
-    listApprovedRules(projectId = "demo-repo"): PlaybookRule[] {
+    listApprovedRules(projectId: string): PlaybookRule[] {
       return dedupeRules(
         db
         .prepare(
@@ -190,7 +190,7 @@ export function createStore(path: string) {
       );
     },
 
-    exportPlaybook(projectId = "demo-repo"): string {
+    exportPlaybook(projectId: string): string {
       const rules = this.listApprovedRules(projectId);
       const lines = [
         "# Signal Recycler Playbook",

@@ -17,21 +17,30 @@ describe("injectPlaybookRules", () => {
     expect(second.match(/Signal Recycler Playbook/g)).toHaveLength(1);
   });
 
-  it("prepends approved rules to the first text item in a structured input array", () => {
+  it("prepends a system message to a Responses API input array without duplicating on re-injection", () => {
     const input = [
-      { type: "text", text: "Diagnose this failing test." },
+      { type: "message", role: "user", content: "Diagnose this failing test." },
       { type: "local_image", path: "./screen.png" }
     ];
+    const rules = [{ id: "rule_1", rule: "Never use library-x in this repo.", category: "dependency" }];
 
-    const result = injectPlaybookRules(input, [
-      { id: "rule_1", rule: "Never use library-x in this repo.", category: "dependency" }
-    ]);
+    const first = injectPlaybookRules(input, rules);
+    const second = injectPlaybookRules(first, rules);
 
-    expect(Array.isArray(result)).toBe(true);
-    expect(result[0]).toMatchObject({
-      type: "text",
-      text: expect.stringContaining("Never use library-x in this repo.")
+    expect(Array.isArray(first)).toBe(true);
+    // System message is prepended
+    expect(first[0]).toMatchObject({
+      type: "message",
+      role: "system",
+      content: expect.stringContaining("Never use library-x in this repo.")
     });
-    expect(result[1]).toEqual(input[1]);
+    // Original items follow
+    expect(first[1]).toEqual(input[0]);
+    expect(first[2]).toEqual(input[1]);
+    // Re-injection deduplicates the system message
+    expect(second.filter((item: unknown) => {
+      const msg = item as Record<string, unknown>;
+      return msg["role"] === "system";
+    })).toHaveLength(1);
   });
 });

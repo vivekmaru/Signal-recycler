@@ -1,5 +1,3 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Codex } from "@openai/codex-sdk";
 import { injectPlaybookRules } from "./playbook.js";
 import { type SignalRecyclerStore } from "./store.js";
@@ -12,23 +10,25 @@ type ThreadLike = {
 export function createCodexRunner(input: {
   store: SignalRecyclerStore;
   apiPort: number;
+  projectId: string;
+  workingDirectory: string;
 }): CodexRunner {
   const threads = new Map<string, ThreadLike>();
   const codex = new Codex({
     baseUrl: `http://127.0.0.1:${input.apiPort}/proxy/v1`,
-    apiKey: process.env.OPENAI_API_KEY,
+    ...(process.env.OPENAI_API_KEY ? { apiKey: process.env.OPENAI_API_KEY } : {}),
     env: stringEnv(process.env)
   });
 
   return {
     async run({ sessionId, prompt }) {
-      const rules = input.store.listApprovedRules("demo-repo");
+      const rules = input.store.listApprovedRules(input.projectId);
       input.store.createEvent({
         sessionId,
         category: "proxy_request",
         title: "Codex SDK routed through proxy",
-        body: "The dashboard run is sent through Signal Recycler before Codex sees it.",
-        metadata: { approvedRulesAvailable: rules.length }
+        body: `Running in ${input.workingDirectory} — Signal Recycler will intercept and compress traffic before Codex sees it.`,
+        metadata: { approvedRulesAvailable: rules.length, workingDirectory: input.workingDirectory }
       });
       if (rules.length > 0) {
         input.store.createEvent({
@@ -45,8 +45,8 @@ export function createCodexRunner(input: {
         return {
           finalResponse:
             rules.length > 0
-              ? `Checking learned constraints... ${rules[0]?.rule} I will avoid the previous npm path.`
-              : "I tried npm install and it failed. The user corrected me to use pnpm test instead.",
+              ? `Checking learned constraints from playbook... ${rules[0]?.rule ?? ""} Applying rules before proceeding.`
+              : "Encountered a failure. The correction should be captured as a durable rule.",
           items: [{ type: "mock", injected }]
         };
       }
@@ -54,7 +54,7 @@ export function createCodexRunner(input: {
       let thread = threads.get(sessionId);
       if (!thread) {
         thread = codex.startThread({
-          workingDirectory: fixtureRepoPath(),
+          workingDirectory: input.workingDirectory,
           skipGitRepoCheck: true
         }) as ThreadLike;
         threads.set(sessionId, thread);
@@ -67,11 +67,6 @@ export function createCodexRunner(input: {
       };
     }
   };
-}
-
-function fixtureRepoPath(): string {
-  const current = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(current, "../../../fixtures/demo-repo");
 }
 
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {

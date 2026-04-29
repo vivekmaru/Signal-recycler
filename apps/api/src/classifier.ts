@@ -78,28 +78,62 @@ function heuristicClassify(input: {
   finalResponse: string;
   items: unknown[];
 }): ClassifierResult {
-  const text = `${input.prompt}\n${input.finalResponse}`.toLowerCase();
+  const text = `${input.prompt}\n${input.finalResponse}`;
+  const lower = text.toLowerCase();
   const signal: string[] = [];
   const noise: string[] = [];
   const failure: string[] = [];
   const candidateRules: ClassifierResult["candidateRules"] = [];
 
-  if (text.includes("pnpm")) {
-    signal.push("The turn references pnpm as a project-specific workflow constraint.");
+  // Detect explicit corrections or constraint discoveries
+  if (/instead|corrected|should use|prefer|avoid|don't use|do not use/i.test(text)) {
+    signal.push("The turn contains a correction or constraint discovery worth preserving.");
   }
-  if (text.includes("npm") && text.includes("fail")) {
-    failure.push("The turn describes an npm-based failure.");
-    candidateRules.push({
+
+  // Detect command/tool failures that led to a correction
+  const failurePatterns: Array<{ pattern: RegExp; category: string; extract: (m: RegExpMatchArray) => string | null }> = [
+    {
+      // "use X instead of Y" — explicit replacement
+      pattern: /use (\w+) instead of (\w+)/i,
       category: "tooling",
-      rule: "Use pnpm instead of npm for package and script operations in this repo.",
-      reason: "A previous Codex run hit an npm path that was corrected to pnpm."
-    });
+      extract: (m) => `Use ${m[1]} instead of ${m[2]} for operations in this repo.`
+    },
+    {
+      // "corrected (me) to use X instead" — implicit correction with ellipsis between tokens
+      pattern: /corrected .{0,20}use (\w+(?:\s\w+)*?) instead/i,
+      category: "tooling",
+      extract: (m) => `Use ${m[1]?.trim()} — a previous attempt with an alternative was corrected.`
+    },
+    {
+      pattern: /(\w+)\s+(?:is|was)\s+(?:not found|unavailable|missing)/i,
+      category: "environment",
+      extract: (m) => `${m[1]} is not available in this environment — use an alternative.`
+    },
+    {
+      pattern: /must (?:use|run|install|set) ([^\.\n]{5,60})/i,
+      category: "convention",
+      extract: (m) => `Project convention: must ${m[1]?.trim()}.`
+    }
+  ]
+
+  for (const { pattern, category, extract } of failurePatterns) {
+    const match = text.match(pattern)
+    if (match) {
+      const rule = extract(match)
+      if (rule) {
+        failure.push(`Detected a correctable failure pattern: "${match[0]}".`)
+        candidateRules.push({ category, rule, reason: `Extracted from Codex turn: "${match[0]}".` })
+      }
+    }
   }
-  if (text.includes("corrected") || text.includes("instead")) {
-    signal.push("The user correction should be converted into durable project memory.");
+
+  // Generic failure signals
+  if (/\bfailed\b|\berror\b|\bexception\b/i.test(lower) && candidateRules.length === 0) {
+    failure.push("The turn contains failure signals but no clear correctable rule was found.");
   }
+
   if (input.items.length > 0) {
-    noise.push(`${input.items.length} raw Codex item(s) collapsed into a turn summary.`);
+    noise.push(`${input.items.length} raw Codex item(s) collapsed into this turn summary.`);
   }
 
   return { signal, noise, failure, candidateRules };

@@ -1,109 +1,102 @@
 # Signal Recycler
 
-A local Codex SDK proxy that turns failed agent work into durable project memory.
+A local Codex SDK proxy that compresses noisy agent history and turns failed work into durable, human-approved project memory — injected automatically into every future turn.
 
-## Status
+## How it works
 
-Build is implemented as a 1-day MVP:
-
-- React/Vite dashboard at `apps/web`
-- Fastify API and Codex SDK proxy at `apps/api`
-- Shared TypeScript schemas at `packages/shared`
-- Bundled demo repo at `fixtures/demo-repo`
-- SQLite persistence for sessions, events, and rules
-- Live Codex SDK path wired through the local proxy
-- Mock Codex mode available only as a fallback when you do not want to spend API calls
+```
+Your prompt
+    │
+    ▼
+Signal Recycler Proxy  ◄── sits between Codex CLI / SDK and OpenAI
+    │
+    ├─ 1. Compress  — strips large stack traces & error dumps from history
+    ├─ 2. Inject    — prepends approved playbook rules as a system message
+    │
+    ▼
+OpenAI Responses API   ◄── leaner context, better focus, real token savings
+    │
+    ▼
+Codex response
+    │
+    ▼
+Signal Recycler Classifier  ◄── marks signal / noise / failure
+    │
+    ▼
+Rule candidates  ◄── you approve or reject in the dashboard
+```
 
 ## Quick Start
 
 ```bash
 pnpm install
 cp .env.example .env
-# Add your real key to .env:
-# OPENAI_API_KEY=sk-...
+# Add a Project API key (sk-proj-...) — required for the Responses API:
+# OPENAI_API_KEY=sk-proj-...
 pnpm dev
 ```
 
-Open http://127.0.0.1:5173.
+Open http://127.0.0.1:5173. The API runs on http://127.0.0.1:3001.
 
-The API runs on http://127.0.0.1:3001.
+## Use with your own project
 
-## Environment
+Point Signal Recycler at any directory:
 
-Use `.env.example` as the reference.
+```bash
+SIGNAL_RECYCLER_WORKDIR=/path/to/your/project pnpm dev
+```
+
+Or set it in `.env`:
+
+```
+SIGNAL_RECYCLER_WORKDIR=/path/to/your/project
+SIGNAL_RECYCLER_PROJECT_ID=my-project
+```
+
+## Use with Codex CLI (shell integration)
+
+To route every `codex` command in your terminal through Signal Recycler automatically — **no code changes needed**:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export OPENAI_BASE_URL=http://127.0.0.1:3001/proxy
+```
+
+With this set, the Codex CLI will route all Responses API traffic through Signal Recycler. The proxy intercepts each request, compresses historical noise, and injects your approved playbook rules before forwarding to OpenAI.
+
+Start Signal Recycler once (`pnpm dev`) and leave it running as a background service while you work.
+
+## Environment variables
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
+| `OPENAI_API_KEY` | Yes | — | Project API key (`sk-proj-...`) — required for the Responses API. |
+| `SIGNAL_RECYCLER_WORKDIR` | No | repo root | Directory Codex operates in. |
+| `SIGNAL_RECYCLER_PROJECT_ID` | No | basename of workdir | Namespace for rules and sessions. |
 | `PORT` | No | `3001` | API server port. |
 | `SIGNAL_RECYCLER_DB` | No | `./signal-recycler.sqlite` | SQLite database path. |
-| `SIGNAL_RECYCLER_LOG_LEVEL` | No | unset | Set to `error` for useful failure logs. Avoid `info` unless you want every request logged. |
-| `SIGNAL_RECYCLER_CONNECT_TIMEOUT_MS` | No | `60000` | Upstream OpenAI connect timeout used by the proxy. |
-| `OPENAI_API_KEY` | Yes for real demo | unset | Required for live Codex/OpenAI calls. |
-| `OPENAI_BASE_URL` | No | `https://api.openai.com` | Upstream API base for proxy pass-through. |
-| `SIGNAL_RECYCLER_CLASSIFIER_MODEL` | No | `gpt-5.1-mini` | Model used for structured rule extraction. |
-| `SIGNAL_RECYCLER_MOCK_CODEX` | No | `0` | Set to `1` only for deterministic local fallback mode. |
+| `SIGNAL_RECYCLER_UPSTREAM_URL` | No | `https://api.openai.com` | Where the proxy forwards traffic. Never set this to the proxy URL. |
+| `SIGNAL_RECYCLER_CLASSIFIER_MODEL` | No | `gpt-5.1-mini` | Model used for rule extraction. |
+| `SIGNAL_RECYCLER_MOCK_CODEX` | No | `0` | Set to `1` for UI-only demos without API calls. |
+| `OPENAI_BASE_URL` | Shell only | — | Set this in your shell (not `.env`) to route the Codex CLI through the proxy. |
 
-Recommended hackathon mode with real Codex:
+## Meta demo (Signal Recycler on itself)
 
-```bash
-OPENAI_API_KEY=sk-... pnpm dev
-```
+By default, `SIGNAL_RECYCLER_WORKDIR` resolves to this repo. The **Teach memory** button runs `pnpm test` against Signal Recycler itself. Failures become candidate rules. Approve them, then run **Use memory** — the proxy injects the rules into the next Codex turn automatically.
 
-Fallback UI-only mode:
+## API
 
-```bash
-SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev
-```
-
-In real mode, the API creates Codex SDK threads against `fixtures/demo-repo` and configures the SDK with the local Signal Recycler proxy base URL. That is the “not possible before Codex” part: the app is not just summarizing chat; it is supervising an actual Codex agent loop, observing tool-backed repo work, and feeding approved lessons into future Codex turns.
-
-## Demo Script
-
-The demo has two turns:
-
-- `Teach memory`: Codex is asked to validate the fixture by trying `npm test`. The fixture is designed to reject npm-driven script execution, so this creates a concrete failure and correction: use pnpm.
-- `Use memory`: After you approve the generated rule, a fresh Codex turn receives the Signal Recycler Playbook through the proxy and should avoid repeating the npm path.
-
-1. Start the app with your real OpenAI key:
-
-   ```bash
-   OPENAI_API_KEY=sk-... pnpm dev
-   ```
-
-2. Open http://127.0.0.1:5173.
-
-3. Click `Teach memory`, then `Run prompt`.
-
-4. In the right Playbook panel, approve the pending rule:
-
-   ```text
-   Use pnpm instead of npm for package and script operations in this repo.
-   ```
-
-5. Click `Use memory`, then `Run prompt`.
-
-6. Confirm the timeline includes `proxy request` and `proxy injection`, and the second response references the injected playbook rule.
-
-For a deterministic fallback demo without API calls, run `SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev` and follow the same steps.
-
-## Terminal Smoke Test
-
-With the API server already running:
-
-```bash
-pnpm smoke:demo
-```
-
-Expected result:
-
-- Creates a session.
-- Runs Teach memory.
-- Approves the first generated rule.
-- Runs Use memory.
-- Prints `hasProxyInjection: true`.
-- Prints a second response that references the approved pnpm rule.
-
-By default, this smoke script is most reliable in mock mode. Use the browser flow for the real Codex demo.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/config` | Working directory and project ID. |
+| `POST` | `/api/sessions` | Create a session. |
+| `POST` | `/api/sessions/:id/run` | Run a prompt through Signal Recycler. |
+| `GET` | `/api/sessions/:id/events` | Read timeline events. |
+| `GET` | `/api/rules` | List playbook rules. |
+| `POST` | `/api/rules/:id/approve` | Approve a candidate rule. |
+| `POST` | `/api/rules/:id/reject` | Reject a candidate rule. |
+| `GET` | `/api/playbook/export` | Export approved rules as Markdown. |
+| `POST` | `/proxy/*` | Proxy Codex/OpenAI-compatible traffic. |
 
 ## Verification
 
@@ -113,27 +106,8 @@ pnpm type-check
 pnpm build
 ```
 
-Current verified state:
-
-- `pnpm test` passes.
-- `pnpm type-check` passes.
-- `pnpm build` passes.
-
-## API Endpoints
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/sessions` | Create a demo Codex session. |
-| `POST` | `/api/sessions/:id/run` | Run a prompt through Signal Recycler. |
-| `GET` | `/api/sessions/:id/events` | Read timeline events. |
-| `GET` | `/api/rules` | List playbook rules. |
-| `POST` | `/api/rules/:id/approve` | Approve a candidate rule. |
-| `POST` | `/api/rules/:id/reject` | Reject a candidate rule. |
-| `GET` | `/api/playbook/export` | Export approved rules as Markdown. |
-| `POST` | `/proxy/*` | Proxy Codex/OpenAI-compatible traffic upstream. |
-
 ## Notes
 
-- This repo currently requires a recent Node version with `node:sqlite`; it was built and verified with Node `v25.8.1`.
-- The root `signal-recycler.sqlite` file is runtime state and is ignored by git.
-- Playwright screenshot verification is not configured yet.
+- Requires Node.js with `node:sqlite` (verified on v25.8.1).
+- `signal-recycler.sqlite` is runtime state — git-ignored.
+- See [ROADMAP.md](./ROADMAP.md) for planned features.

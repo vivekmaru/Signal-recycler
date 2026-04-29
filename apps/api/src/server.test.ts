@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createStore } from "./store.js";
 
+const TEST_APP_OPTIONS = {
+  projectId: "test-project",
+  workingDirectory: "/tmp/test-project"
+} as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -9,6 +14,7 @@ afterEach(() => {
 describe("api", () => {
   it("creates a tracked session", async () => {
     const app = await createApp({
+      ...TEST_APP_OPTIONS,
       store: createStore(":memory:"),
       codexRunner: {
         run: async () => ({ finalResponse: "ok", items: [] })
@@ -24,13 +30,14 @@ describe("api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       title: "Judge demo",
-      projectId: "demo-repo"
+      projectId: TEST_APP_OPTIONS.projectId
     });
   });
 
   it("creates rule candidates during a run and emits ordered events", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
+      ...TEST_APP_OPTIONS,
       store,
       codexRunner: {
         run: async () => ({
@@ -59,6 +66,7 @@ describe("api", () => {
   it("returns a clear gateway error when the Codex runner fails", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
+      ...TEST_APP_OPTIONS,
       store,
       codexRunner: {
         run: async () => {
@@ -91,6 +99,7 @@ describe("api", () => {
     );
 
     const app = await createApp({
+      ...TEST_APP_OPTIONS,
       store: createStore(":memory:"),
       codexRunner: {
         run: async () => ({ finalResponse: "ok", items: [] })

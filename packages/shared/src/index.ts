@@ -7,6 +7,7 @@ export const eventCategorySchema = z.enum([
   "codex_event",
   "proxy_request",
   "proxy_injection",
+  "compression_result",
   "classifier_result",
   "rule_candidate",
   "rule_approved",

@@ -1,3 +1,4 @@
+import path from "node:path";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
@@ -5,6 +6,7 @@ import {
   runRequestSchema
 } from "@signal-recycler/shared";
 import { classifyTurn } from "./classifier.js";
+import { compressRequestBody } from "./compressor.js";
 import { injectIntoRequestBody } from "./playbook.js";
 import { type SignalRecyclerStore } from "./store.js";
 
@@ -18,16 +20,19 @@ export type CodexRunner = {
 type AppOptions = {
   store: SignalRecyclerStore;
   codexRunner: CodexRunner;
+  projectId: string;
+  workingDirectory: string;
   upstreamBaseUrl?: string;
 };
 
 export async function createApp(options: AppOptions): Promise<FastifyInstance> {
+  const { projectId, workingDirectory } = options;
+
   const app = Fastify({
     logger: process.env.SIGNAL_RECYCLER_LOG_LEVEL
       ? { level: process.env.SIGNAL_RECYCLER_LOG_LEVEL }
       : false
   });
-  const projectId = "demo-repo";
 
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
@@ -51,9 +56,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     }
   });
 
-  await app.register(cors, {
-    origin: true
-  });
+  await app.register(cors, { origin: true });
 
   app.addHook("onRequest", async (request) => {
     if (!request.url.startsWith("/proxy/")) return;
@@ -64,11 +67,17 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get("/health", async () => ({ ok: true }));
 
+  app.get("/api/config", async () => ({
+    projectId,
+    workingDirectory,
+    workingDirectoryBasename: path.basename(workingDirectory)
+  }));
+
   app.post("/api/sessions", async (request) => {
     const parsed = createSessionRequestSchema.parse(request.body ?? {});
     return options.store.createSession({
       projectId,
-      title: parsed.title ?? "Signal Recycler demo"
+      title: parsed.title ?? `Signal Recycler — ${path.basename(workingDirectory)}`
     });
   });
 
@@ -101,11 +110,9 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
         metadata: { phase: "codex_error" }
       });
       request.log.error({ err: error }, "Codex run failed");
-      return reply.code(502).send({
-        error: "Codex run failed",
-        message
-      });
+      return reply.code(502).send({ error: "Codex run failed", message });
     }
+
     const codexEvent = options.store.createEvent({
       sessionId: id,
       category: "codex_event",
@@ -183,15 +190,40 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   app.all("/proxy/*", async (request, reply) => {
+    const sessionId = request.headers["x-signal-recycler-session-id"]?.toString() ?? "proxy";
     const rules = options.store.listApprovedRules(projectId);
     const tail = request.url.replace(/^\/proxy/, "");
     const upstreamBaseUrl =
-      options.upstreamBaseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com";
+      options.upstreamBaseUrl ??
+      process.env.SIGNAL_RECYCLER_UPSTREAM_URL ??
+      "https://api.openai.com";
     const upstreamUrl = `${upstreamBaseUrl.replace(/\/$/, "")}${tail}`;
-    const body = request.body ? injectProxyBody(request.body, rules) : undefined;
+
+    // Step 1: compress noisy history items before they reach Codex
+    let rawBody = request.body;
+    if (rawBody && request.method === "POST") {
+      const { body: compressed, result } = compressRequestBody(rawBody);
+      if (result && result.charsRemoved > 0) {
+        rawBody = compressed;
+        options.store.createEvent({
+          sessionId,
+          category: "compression_result",
+          title: "History compressed",
+          body: `Removed ${result.charsRemoved} chars (≈${result.tokensRemoved} tokens) across ${result.compressions} noisy output(s).`,
+          metadata: {
+            charsRemoved: result.charsRemoved,
+            tokensRemoved: result.tokensRemoved,
+            compressions: result.compressions
+          }
+        });
+      }
+    }
+
+    // Step 2: inject approved playbook rules
+    const body = rawBody ? injectProxyBody(rawBody, rules) : undefined;
 
     options.store.createEvent({
-      sessionId: request.headers["x-signal-recycler-session-id"]?.toString() ?? "proxy",
+      sessionId,
       category: "proxy_request",
       title: "Proxy request",
       body: `${request.method} ${tail}`,
@@ -199,7 +231,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     });
     if (rules.length > 0) {
       options.store.createEvent({
-        sessionId: request.headers["x-signal-recycler-session-id"]?.toString() ?? "proxy",
+        sessionId,
         category: "proxy_injection",
         title: "Playbook injected",
         body: `${rules.length} approved rule(s) prepended to the request.`,
@@ -216,16 +248,10 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       headers.set("authorization", `Bearer ${process.env.OPENAI_API_KEY}`);
     }
     if (body !== undefined) {
-      headers.set(
-        "content-type",
-        typeof body === "string" ? "application/json" : "application/json"
-      );
+      headers.set("content-type", "application/json");
     }
 
-    const fetchInit: RequestInit = {
-      method: request.method,
-      headers
-    };
+    const fetchInit: RequestInit = { method: request.method, headers };
     if (body !== undefined) {
       fetchInit.body = typeof body === "string" ? body : JSON.stringify(body);
     }
@@ -234,9 +260,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
 
     reply.code(upstream.status);
     upstream.headers.forEach((value, key) => {
-      if (!shouldDropResponseHeader(key)) {
-        reply.header(key, value);
-      }
+      if (!shouldDropResponseHeader(key)) reply.header(key, value);
     });
     return reply.send(upstream.body);
   });
@@ -244,7 +268,10 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   return app;
 }
 
-function injectProxyBody(body: unknown, rules: ReturnType<SignalRecyclerStore["listApprovedRules"]>): unknown {
+function injectProxyBody(
+  body: unknown,
+  rules: ReturnType<SignalRecyclerStore["listApprovedRules"]>
+): unknown {
   if (typeof body === "string") {
     try {
       return injectIntoRequestBody(JSON.parse(body), rules);
@@ -260,12 +287,9 @@ function shouldDropRequestHeader(key: string): boolean {
 }
 
 function shouldDropResponseHeader(key: string): boolean {
-  return [
-    "connection",
-    "content-length",
-    "content-encoding",
-    "transfer-encoding"
-  ].includes(key.toLowerCase());
+  return ["connection", "content-length", "content-encoding", "transfer-encoding"].includes(
+    key.toLowerCase()
+  );
 }
 
 const REQUEST_ENTITY_HEADERS_TO_DROP_BEFORE_PARSE = [

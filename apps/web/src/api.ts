@@ -1,5 +1,15 @@
 import type { PlaybookRule, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
 
+export type ApiConfig = {
+  projectId: string;
+  workingDirectory: string;
+  workingDirectoryBasename: string;
+};
+
+export async function fetchConfig(): Promise<ApiConfig> {
+  return readJson(await fetch("/api/config"));
+}
+
 export type RunResult = {
   finalResponse: string;
   candidateRules: PlaybookRule[];
