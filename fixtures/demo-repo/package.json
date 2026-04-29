@@ -1,0 +1,10 @@
+{
+  "name": "signal-recycler-demo-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node src/check.js",
+    "format": "node src/check.js --format"
+  },
+  "packageManager": "pnpm@10.14.0"
+}

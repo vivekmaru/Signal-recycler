@@ -1,0 +1,65 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+build
+.next
+out
+
+# Environment
+.env
+.env.local
+.env.test
+.env.*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+
+# Drizzle
+drizzle/**/*.sql
+!drizzle/migrations/*.sql
+
+# Vite
+.vite
+
+# Misc
+*.tsbuildinfo
+.turbo
+
+# Playwright
+test-results
+playwright-report
+playwright/.cache
+
+# Tool state
+.tsos
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Root images (mockups)
+# *.png
+# *.jpg
+# *.jpeg
+!apps/web/public/**
+*settings.local.json
+
+# Personal files
+.stash/
