@@ -119,6 +119,13 @@ export function createStore(path: string) {
         .map(mapEvent);
     },
 
+    listAllEvents(limit = 100): TimelineEvent[] {
+      return db
+        .prepare("SELECT * FROM events ORDER BY created_at DESC LIMIT ?")
+        .all(limit)
+        .map(mapEvent);
+    },
+
     createRuleCandidate(input: CreateRuleInput): PlaybookRule {
       const rule: PlaybookRule = {
         id: createId("rule"),
@@ -188,6 +195,32 @@ export function createStore(path: string) {
         .all(projectId)
           .map(mapRule)
       );
+    },
+
+    clearProjectMemory(projectId: string): { rulesDeleted: number; eventsDeleted: number; sessionsDeleted: number } {
+      const rulesResult = db
+        .prepare("DELETE FROM rules WHERE project_id = ?")
+        .run(projectId);
+      // Delete events and sessions tied to this project's sessions
+      const sessionRows = db
+        .prepare("SELECT id FROM sessions WHERE project_id = ?")
+        .all(projectId) as Array<{ id: string }>;
+      let eventsDeleted = 0;
+      for (const row of sessionRows) {
+        const r = db.prepare("DELETE FROM events WHERE session_id = ?").run(row.id);
+        eventsDeleted += Number(r.changes);
+      }
+      // Also delete the floating "proxy" bucket events (CLI traffic)
+      const proxyEvents = db.prepare("DELETE FROM events WHERE session_id = 'proxy'").run();
+      eventsDeleted += Number(proxyEvents.changes);
+      const sessionsResult = db
+        .prepare("DELETE FROM sessions WHERE project_id = ?")
+        .run(projectId);
+      return {
+        rulesDeleted: Number(rulesResult.changes),
+        eventsDeleted,
+        sessionsDeleted: Number(sessionsResult.changes)
+      };
     },
 
     exportPlaybook(projectId: string): string {

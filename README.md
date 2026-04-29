@@ -55,16 +55,25 @@ SIGNAL_RECYCLER_PROJECT_ID=my-project
 
 ## Use with Codex CLI (shell integration)
 
-To route every `codex` command in your terminal through Signal Recycler automatically — **no code changes needed**:
+The Codex CLI authenticates via ChatGPT OAuth by default, which **bypasses `OPENAI_BASE_URL`**. To route it through Signal Recycler, register a custom `model_provider`. We ship two scripts that manage `~/.codex/config.toml` for you safely (they back up your file the first time and only edit a clearly-marked managed block):
 
 ```bash
-# Add to ~/.zshrc or ~/.bashrc
-export OPENAI_BASE_URL=http://127.0.0.1:3001/proxy
+pnpm codex:install      # add the signal_recycler model_provider block
+pnpm codex:uninstall    # remove it, restoring your config.toml
 ```
 
-With this set, the Codex CLI will route all Responses API traffic through Signal Recycler. The proxy intercepts each request, compresses historical noise, and injects your approved playbook rules before forwarding to OpenAI.
+Both commands are idempotent. A backup is written to `~/.codex/config.toml.bak.signal-recycler` the first time we modify the file.
 
-Start Signal Recycler once (`pnpm dev`) and leave it running as a background service while you work.
+**Then in any terminal:**
+
+```bash
+export OPENAI_API_KEY=sk-proj-...
+codex -c model_provider='"signal_recycler"' "your prompt..."
+```
+
+Or set `model_provider = "signal_recycler"` at the top of `~/.codex/config.toml` to make it the default for every `codex` invocation.
+
+Start Signal Recycler once (`pnpm dev`) and leave it running. Every CLI turn is now intercepted, compressed, and given the approved playbook — visible live in the dashboard timeline.
 
 ## Environment variables
 

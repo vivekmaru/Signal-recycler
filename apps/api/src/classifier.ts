@@ -24,8 +24,17 @@ export async function classifyTurn(input: {
       input: [
         {
           role: "system",
-          content:
-            "Classify this Codex turn into signal, noise, failure, and durable project rules. Only propose rules that should affect future Codex work."
+          content: [
+            "Classify this Codex turn for Signal Recycler.",
+            "",
+            "RULES:",
+            "- Only mark something as `failure` if Codex itself hit a real, blocking error this turn AND you can extract a durable rule from it.",
+            "- Do NOT mark intentional failures, expected error logs, or natural-language descriptions of past failures as failures.",
+            "- `noise` is for low-value content you would strip before re-running (large stack traces, redundant tool outputs).",
+            "- `signal` is for durable observations about the project worth remembering.",
+            "- `candidateRules` MUST be non-empty when `failure` is non-empty. If you cannot extract a clear, generalizable rule from a failure, do not list it as a failure.",
+            "- Each rule must include `confidence`: `high` if the rule is unambiguous and directly stated by the turn (e.g. an explicit correction); `medium` if it is a strong inference; `low` for tentative observations."
+          ].join("\n")
         },
         {
           role: "user",
@@ -50,11 +59,12 @@ export async function classifyTurn(input: {
                 items: {
                   type: "object",
                   additionalProperties: false,
-                  required: ["category", "rule", "reason"],
+                  required: ["category", "rule", "reason", "confidence"],
                   properties: {
                     category: { type: "string" },
                     rule: { type: "string" },
-                    reason: { type: "string" }
+                    reason: { type: "string" },
+                    confidence: { type: "string", enum: ["high", "medium", "low"] }
                   }
                 }
               }
@@ -122,15 +132,19 @@ function heuristicClassify(input: {
       const rule = extract(match)
       if (rule) {
         failure.push(`Detected a correctable failure pattern: "${match[0]}".`)
-        candidateRules.push({ category, rule, reason: `Extracted from Codex turn: "${match[0]}".` })
+        candidateRules.push({
+          category,
+          rule,
+          reason: `Extracted from Codex turn: "${match[0]}".`,
+          confidence: "high"
+        })
       }
     }
   }
 
-  // Generic failure signals
-  if (/\bfailed\b|\berror\b|\bexception\b/i.test(lower) && candidateRules.length === 0) {
-    failure.push("The turn contains failure signals but no clear correctable rule was found.");
-  }
+  // Only mark "failure" when we actually extracted a candidate rule from it.
+  // Otherwise we trip on assistant prose that merely *describes* failures
+  // (e.g. "this test intentionally throws 401 to verify error handling").
 
   if (input.items.length > 0) {
     noise.push(`${input.items.length} raw Codex item(s) collapsed into this turn summary.`);

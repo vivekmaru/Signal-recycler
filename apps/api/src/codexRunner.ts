@@ -21,14 +21,15 @@ export function createCodexRunner(input: {
   });
 
   return {
-    async run({ sessionId, prompt }) {
+    async run({ sessionId, prompt, workingDirectory: overrideDir }) {
+      const effectiveDir = overrideDir ?? input.workingDirectory;
       const rules = input.store.listApprovedRules(input.projectId);
       input.store.createEvent({
         sessionId,
         category: "proxy_request",
         title: "Codex SDK routed through proxy",
-        body: `Running in ${input.workingDirectory} — Signal Recycler will intercept and compress traffic before Codex sees it.`,
-        metadata: { approvedRulesAvailable: rules.length, workingDirectory: input.workingDirectory }
+        body: `Running in ${effectiveDir} — Signal Recycler will intercept and compress traffic before Codex sees it.`,
+        metadata: { approvedRulesAvailable: rules.length, workingDirectory: effectiveDir }
       });
       if (rules.length > 0) {
         input.store.createEvent({
@@ -51,13 +52,16 @@ export function createCodexRunner(input: {
         };
       }
 
-      let thread = threads.get(sessionId);
+      // Threads are keyed by (sessionId + workingDirectory) so a session that
+      // touches multiple directories doesn't get a stale chdir.
+      const threadKey = `${sessionId}::${effectiveDir}`;
+      let thread = threads.get(threadKey);
       if (!thread) {
         thread = codex.startThread({
-          workingDirectory: input.workingDirectory,
+          workingDirectory: effectiveDir,
           skipGitRepoCheck: true
         }) as ThreadLike;
-        threads.set(sessionId, thread);
+        threads.set(threadKey, thread);
       }
 
       const turn = await thread.run(prompt);

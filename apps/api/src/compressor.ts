@@ -1,5 +1,9 @@
-// Chars to keep at the start of a compressed item so context isn't completely lost.
-const PREVIEW_CHARS = 400
+// Chars to keep at the start and end of a compressed item so context isn't completely lost.
+const KEEP_HEAD = 400
+const KEEP_TAIL = 400
+
+// Minimum net characters saved to justify the compression overhead.
+const MIN_SAVING = 200
 
 // Output types from the Responses API that can carry large noisy payloads.
 const COMPRESSIBLE_TYPES = new Set([
@@ -24,16 +28,12 @@ export type CompressResult = {
  *  - Pattern-based is safer than length-only: only compress when there's a clear
  *    error signal, not just because the output is long
  *
- * The PREVIEW_CHARS at the top of the file controls how much you keep even
- * when the content IS noisy — tune that if you want a larger preview window.
- *
- * You have access to the full `text` string. Return true to compress, false to
- * leave untouched. The function is only called when text.length > PREVIEW_CHARS,
- * so you don't need to re-check length here.
+ * We now keep both a head and tail window to ensure we don't lose the final
+ * error message which is usually at the bottom of a stack trace.
  */
 function isNoisyContent(text: string): boolean {
   const NOISE_PATTERNS = [
-    /\berror:/i,
+    /\berror\b/i,
     /\bfailed\b/i,
     /traceback \(most recent call last\)/i,
     /stack trace:/i,
@@ -43,7 +43,7 @@ function isNoisyContent(text: string): boolean {
     /\bSyntaxError\b/,
     /\bTypeError\b/,
     /\bReferenceError\b/,
-    /\d+ (errors?|failures?)/i,
+    /[1-9]\d* (errors?|failures?)/i,
     /FAILED \d+/,
     /✗|✕|FAIL\b/
   ]
@@ -56,36 +56,47 @@ function tryCompressItem(item: unknown): { item: unknown; charsRemoved: number }
 
   const output = item["output"]
   if (typeof output !== "string") return null
-  if (output.length <= PREVIEW_CHARS) return null
+  
+  // Only compress if the output is long enough to have a head, tail, AND meaningful savings.
+  if (output.length <= KEEP_HEAD + KEEP_TAIL + MIN_SAVING) return null
   if (!isNoisyContent(output)) return null
 
-  const preview = output.slice(0, PREVIEW_CHARS)
-  const charsRemoved = output.length - PREVIEW_CHARS
+  const head = output.slice(0, KEEP_HEAD)
+  const tail = output.slice(-KEEP_TAIL)
+  const rawRemoved = output.length - (KEEP_HEAD + KEEP_TAIL)
+  
+  const marker = `\n… [Signal Recycler: compressed ${rawRemoved} chars of noise] …\n`
+  const netRemoved = rawRemoved - marker.length
+
+  // If the marker overhead eats up too much of the savings, skip it.
+  if (netRemoved < MIN_SAVING) return null
+
   return {
     item: {
       ...item,
-      output: `${preview}\n… [Signal Recycler: compressed ${charsRemoved} chars of noise from this output]`
+      output: `${head}${marker}${tail}`
     },
-    charsRemoved
+    charsRemoved: netRemoved
   }
 }
 
 export function compressHistory(items: unknown[]): CompressResult {
-  let charsRemoved = 0
+  let netCharsRemoved = 0
   let compressions = 0
 
   const compressed = items.map((item) => {
     const result = tryCompressItem(item)
     if (!result) return item
-    charsRemoved += result.charsRemoved
+    netCharsRemoved += result.charsRemoved
     compressions++
     return result.item
   })
 
   return {
     items: compressed,
-    charsRemoved,
-    tokensRemoved: Math.round(charsRemoved / 4),
+    charsRemoved: netCharsRemoved,
+    // Use the net characters removed for a more accurate token estimate.
+    tokensRemoved: Math.round(netCharsRemoved / 4),
     compressions
   }
 }

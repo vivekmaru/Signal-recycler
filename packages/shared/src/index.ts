@@ -10,6 +10,7 @@ export const eventCategorySchema = z.enum([
   "compression_result",
   "classifier_result",
   "rule_candidate",
+  "rule_auto_approved",
   "rule_approved",
   "rule_rejected"
 ]);
@@ -47,10 +48,14 @@ export const eventSchema = z.object({
 });
 export type TimelineEvent = z.infer<typeof eventSchema>;
 
+export const ruleConfidenceSchema = z.enum(["high", "medium", "low"]);
+export type RuleConfidence = z.infer<typeof ruleConfidenceSchema>;
+
 export const candidateRuleSchema = z.object({
   category: z.string().min(2),
   rule: z.string().min(8),
-  reason: z.string().min(8)
+  reason: z.string().min(8),
+  confidence: ruleConfidenceSchema.optional().default("medium")
 });
 export type CandidateRule = z.infer<typeof candidateRuleSchema>;
 

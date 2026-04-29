@@ -32,6 +32,10 @@ export async function listEvents(sessionId: string): Promise<TimelineEvent[]> {
   return readJson(await fetch(`/api/sessions/${sessionId}/events`));
 }
 
+export async function listFirehose(limit = 100): Promise<TimelineEvent[]> {
+  return readJson(await fetch(`/api/firehose/events?limit=${limit}`));
+}
+
 export async function runSession(sessionId: string, prompt: string): Promise<RunResult> {
   const response = await fetch(`/api/sessions/${sessionId}/run`, {
     method: "POST",
@@ -47,6 +51,29 @@ export async function approveRule(id: string): Promise<PlaybookRule> {
 
 export async function rejectRule(id: string): Promise<PlaybookRule> {
   return readJson(await fetch(`/api/rules/${id}/reject`, { method: "POST" }));
+}
+
+export type DemoPhaseResult = {
+  sessionId: string;
+  prompt: string;
+  finalResponse: string;
+  items: number;
+  durationMs: number;
+  rulesCreated?: number;
+};
+
+export type DemoRunResult = {
+  phase1: DemoPhaseResult;
+  phase2: DemoPhaseResult;
+};
+
+export async function runDemo(): Promise<DemoRunResult> {
+  const response = await fetch("/api/demo/run", { method: "POST" });
+  return readJson(response);
+}
+
+export async function resetMemory(): Promise<{ rulesDeleted: number; eventsDeleted: number; sessionsDeleted: number }> {
+  return readJson(await fetch("/api/memory/reset", { method: "POST" }));
 }
 
 export async function exportPlaybook(): Promise<string> {

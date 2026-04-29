@@ -9,7 +9,9 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "type-check": "pnpm -r type-check",
-    "smoke:demo": "node scripts/smoke-demo.mjs"
+    "smoke:demo": "node scripts/smoke-demo.mjs",
+    "codex:install": "node scripts/codex-config.mjs install",
+    "codex:uninstall": "node scripts/codex-config.mjs uninstall"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",

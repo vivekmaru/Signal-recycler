@@ -1,36 +1,35 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Check,
-  CircleAlert,
   FileDown,
   FolderOpen,
   Play,
   Recycle,
+  RefreshCw,
   Sparkles,
+  Terminal,
+  Trash2,
   X,
   Zap
 } from "lucide-react";
 import type { PlaybookRule, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
 import {
   type ApiConfig,
+  type DemoRunResult,
   approveRule,
   createSession,
   exportPlaybook,
   fetchConfig,
-  listEvents,
+  listFirehose,
   listRules,
   rejectRule,
+  resetMemory,
+  runDemo,
   runSession
 } from "./api";
 
-function makeTeachPrompt(workdir: string): string {
-  return `In the project at ${workdir}, run \`pnpm test\` and report the results. If any tests fail or produce errors, explain what failed clearly so Signal Recycler can distill a durable rule about this project's setup.`;
-}
-
-function makeUsePrompt(workdir: string): string {
-  return `In the project at ${workdir}, run \`pnpm type-check\`. Before taking any action, check and follow all injected Signal Recycler Playbook rules from previous sessions.`;
-}
+const POLL_INTERVAL_MS = 1500;
 
 export function App() {
   const [config, setConfig] = useState<ApiConfig | null>(null);
@@ -39,71 +38,87 @@ export function App() {
   const [rules, setRules] = useState<PlaybookRule[]>([]);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
+  const [demoRunning, setDemoRunning] = useState(false);
+  const [demoStage, setDemoStage] = useState<"idle" | "phase1" | "approving" | "phase2" | "done">(
+    "idle"
+  );
+  const [demoResult, setDemoResult] = useState<DemoRunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exported, setExported] = useState<string>("");
+  const lastEventCountRef = useRef(0);
 
-  const refresh = useCallback(async (sessionId?: string | null) => {
-    const [nextRules, nextEvents] = await Promise.all([
-      listRules(),
-      sessionId ? listEvents(sessionId) : Promise.resolve([])
-    ]);
+  const refresh = useCallback(async () => {
+    const [nextRules, nextEvents] = await Promise.all([listRules(), listFirehose(200)]);
     setRules(nextRules);
     setEvents(nextEvents);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
 
     async function init() {
       try {
         const cfg = await fetchConfig();
         if (cancelled) return;
         setConfig(cfg);
-        setPrompt(makeTeachPrompt(cfg.workingDirectory));
 
         const created = await createSession();
         if (cancelled) return;
         setSession(created);
-        await refresh(created.id);
+        await refresh();
+
+        interval = setInterval(() => {
+          if (!cancelled) void refresh();
+        }, POLL_INTERVAL_MS);
       } catch (initError) {
         if (!cancelled) setError((initError as Error).message);
       }
     }
 
     void init();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
   }, [refresh]);
 
+  const liveStatus = useMemo(() => {
+    const hadNew = events.length > lastEventCountRef.current;
+    lastEventCountRef.current = events.length;
+    if (events.length === 0) return "idle";
+    return hadNew ? "live" : "connected";
+  }, [events.length]);
+
   const metrics = useMemo(() => {
-    const classifier = events.findLast((e) => e.category === "classifier_result");
-    const meta = classifier?.metadata as
-      | { signal?: string[]; noise?: string[]; failure?: string[] }
-      | undefined;
+    const proxyEvents = events.filter((e) => e.category === "proxy_request");
+    const compressionEvents = events.filter((e) => e.category === "compression_result");
+    const totalTokensSaved = compressionEvents.reduce(
+      (sum, e) => sum + (Number(e.metadata["tokensRemoved"]) || 0),
+      0
+    );
+    const totalCompressions = compressionEvents.reduce(
+      (sum, e) => sum + (Number(e.metadata["compressions"]) || 0),
+      0
+    );
 
-    const signal =
-      meta?.signal?.length ?? events.filter((e) => e.category === "codex_event").length;
-    const noise = meta?.noise?.length ?? 0;
-    const failure =
-      meta?.failure?.length ?? rules.filter((r) => r.status === "pending").length;
-
-    // Real compression tokens from proxy events
-    const compressionTokens = events
-      .filter((e) => e.category === "compression_result")
-      .reduce((sum, e) => sum + (Number(e.metadata["tokensRemoved"]) || 0), 0);
-    // Estimate tokens saved per approved rule (prevents repeated-mistake cost)
-    const rulesTokens = rules.filter((r) => r.status === "approved").length * 300;
-
-    return { signal, noise, failure, saved: compressionTokens + rulesTokens };
+    return {
+      requests: proxyEvents.length,
+      compressions: totalCompressions,
+      pendingRules: rules.filter((r) => r.status === "pending").length,
+      approvedRules: rules.filter((r) => r.status === "approved").length,
+      tokensSaved: totalTokensSaved
+    };
   }, [events, rules]);
 
   async function handleRun(nextPrompt = prompt) {
-    if (!session) return;
+    if (!session || !nextPrompt.trim()) return;
     setRunning(true);
     setError(null);
     setPrompt(nextPrompt);
     try {
       await runSession(session.id, nextPrompt);
-      await refresh(session.id);
+      await refresh();
     } catch (runError) {
       setError((runError as Error).message);
     } finally {
@@ -111,11 +126,44 @@ export function App() {
     }
   }
 
+  async function handleRunDemo() {
+    if (demoRunning) return;
+    setDemoRunning(true);
+    setError(null);
+    setDemoResult(null);
+    setDemoStage("phase1");
+    try {
+      // Reset first so the demo always starts from a known empty-memory state
+      await resetMemory();
+      await refresh();
+      // The orchestrator runs both phases server-side; we surface stage hints
+      // via timing but the real source of truth is the timeline.
+      setTimeout(() => setDemoStage("approving"), 4000);
+      setTimeout(() => setDemoStage("phase2"), 7000);
+      const result = await runDemo();
+      setDemoResult(result);
+      setDemoStage("done");
+      await refresh();
+    } catch (demoError) {
+      setError((demoError as Error).message);
+      setDemoStage("idle");
+    } finally {
+      setDemoRunning(false);
+    }
+  }
+
+  async function handleResetMemory() {
+    if (!window.confirm("Reset all rules, sessions, and events for this project?")) return;
+    await resetMemory();
+    setDemoResult(null);
+    setDemoStage("idle");
+    await refresh();
+  }
+
   async function handleRuleAction(id: string, action: "approve" | "reject") {
-    if (!session) return;
     if (action === "approve") await approveRule(id);
     else await rejectRule(id);
-    await refresh(session.id);
+    await refresh();
   }
 
   async function handleExport() {
@@ -123,42 +171,39 @@ export function App() {
   }
 
   const workdir = config?.workingDirectory ?? "…";
-  const teachPrompt = config ? makeTeachPrompt(config.workingDirectory) : "";
-  const usePrompt = config ? makeUsePrompt(config.workingDirectory) : "";
 
   return (
     <main className="min-h-screen bg-[#f6f3ec] text-[#1d2528]">
       <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col gap-5 px-5 py-5">
         <header className="flex flex-col gap-4 border-b border-[#d7d0c2] pb-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="grid size-11 place-items-center rounded bg-[#1d2528] text-[#d9ff65]">
-                <Recycle size={24} />
-              </div>
-              <div>
-                <h1 className="text-3xl font-semibold tracking-normal">Signal Recycler</h1>
-                <p className="max-w-2xl text-sm text-[#5f6868]">
-                  Codex proxy that compresses noisy history and injects approved project memory
-                  into every turn.
-                </p>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="grid size-11 place-items-center rounded bg-[#1d2528] text-[#d9ff65]">
+              <Recycle size={24} />
+            </div>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-normal">Signal Recycler</h1>
+              <p className="max-w-2xl text-sm text-[#5f6868]">
+                Codex proxy that compresses noise and turns failures into approved memory — every
+                turn auto-extracts rule candidates, high-confidence ones auto-approve.
+              </p>
             </div>
           </div>
           <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Metric label="Signal" value={metrics.signal} tone="emerald" />
-            <Metric label="Noise" value={metrics.noise} tone="stone" />
-            <Metric label="Failure" value={metrics.failure} tone="rose" />
-            <Metric label="Tokens saved" value={metrics.saved} tone="lime" />
+            <Metric label="Requests" value={metrics.requests} tone="emerald" />
+            <Metric label="Compressed" value={metrics.compressions} tone="amber" />
+            <Metric label="Approved rules" value={metrics.approvedRules} tone="lime" />
+            <Metric label="Tokens saved" value={metrics.tokensSaved} tone="lime" highlight />
           </section>
         </header>
 
         <section className="grid flex-1 gap-5 lg:grid-cols-[330px_minmax(0,1fr)_390px]">
           <aside className="panel flex flex-col gap-4">
             <div>
-              <h2 className="panel-title">Run Codex</h2>
+              <h2 className="panel-title">Codex traffic</h2>
               <p className="panel-copy">
-                Teach memory with a real failure, approve the rule, then run a fresh turn. Signal
-                Recycler compresses noise and injects the playbook automatically.
+                Send a prompt from here, or pipe your terminal{" "}
+                <code className="rounded bg-[#ece5d8] px-1">codex</code> CLI through the proxy.
+                Either way, every turn auto-classifies and high-confidence rules auto-approve.
               </p>
             </div>
 
@@ -170,47 +215,68 @@ export function App() {
               <p className="break-all font-mono text-xs leading-5 text-[#263033]">
                 {config ? workdir : <span className="text-[#999]">Loading…</span>}
               </p>
-              {config && (
-                <p className="mt-2 text-xs text-[#66706c]">
-                  Set <code className="rounded bg-[#ece5d8] px-1">SIGNAL_RECYCLER_WORKDIR</code> to
-                  point at any project.
-                </p>
-              )}
             </div>
 
             <textarea
-              className="min-h-36 resize-none rounded border border-[#cfc6b5] bg-[#fffdf7] p-3 text-sm leading-6 outline-none focus:border-[#1d2528]"
+              className="min-h-32 resize-none rounded border border-[#cfc6b5] bg-[#fffdf7] p-3 text-sm leading-6 outline-none focus:border-[#1d2528]"
+              placeholder="Type any prompt — e.g. 'run the test suite and report what failed'"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
             <button
               className="primary-button"
-              disabled={!session || running || !config}
+              disabled={!session || running || !prompt.trim()}
               onClick={() => void handleRun()}
             >
               <Play size={17} />
               {running ? "Running Codex…" : "Run prompt"}
             </button>
-            <div className="grid grid-cols-2 gap-2">
+
+            <div className="rounded border border-dashed border-[#9db92d] bg-[#f4fbe1] p-3">
+              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[#5d7517]">
+                <Sparkles size={14} />
+                Run end-to-end demo
+              </div>
+              <p className="text-xs leading-5 text-[#263033]">
+                Resets memory, then runs two prompts back-to-back: one that triggers a known
+                failure, then the same task after the rule is auto-approved. Compares both runs.
+              </p>
               <button
-                className="secondary-button"
-                disabled={running || !config}
-                onClick={() => void handleRun(teachPrompt)}
+                className="mt-3 w-full rounded bg-[#1d2528] px-3 py-2 text-sm font-semibold text-[#d9ff65] disabled:opacity-50"
+                disabled={demoRunning}
+                onClick={() => void handleRunDemo()}
               >
-                Teach memory
-              </button>
-              <button
-                className="secondary-button"
-                disabled={running || !config}
-                onClick={() => void handleRun(usePrompt)}
-              >
-                Use memory
+                {demoRunning ? `Running demo… (${demoStage})` : "Run learn → use demo"}
               </button>
             </div>
-            <button className="secondary-button justify-center" onClick={() => void handleExport()}>
-              <FileDown size={16} />
-              Export playbook
-            </button>
+
+            <div className="rounded border border-dashed border-[#cfc6b5] bg-white/50 p-3">
+              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[#66706c]">
+                <Terminal size={14} />
+                Use from your terminal
+              </div>
+              <p className="text-xs leading-5 text-[#263033]">
+                Run <code>pnpm codex:install</code> once, then any codex command flows through:
+              </p>
+              <pre className="mt-1 overflow-x-auto rounded bg-[#202726] p-2 text-[11px] leading-5 text-[#e7f7dc]">
+                {`codex -c model_provider='"signal_recycler"' \\\n  "your prompt..."`}
+              </pre>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button className="secondary-button justify-center" onClick={() => void handleExport()}>
+                <FileDown size={16} />
+                Export
+              </button>
+              <button
+                className="secondary-button justify-center text-[#8b2c13]"
+                onClick={() => void handleResetMemory()}
+              >
+                <Trash2 size={16} />
+                Reset
+              </button>
+            </div>
+
             {error ? (
               <p className="rounded bg-[#ffe8de] p-3 text-sm text-[#8b2c13]">{error}</p>
             ) : null}
@@ -222,14 +288,17 @@ export function App() {
           </aside>
 
           <section className="panel min-h-[660px]">
+            {demoResult ? <DemoImpactPanel result={demoResult} /> : null}
+
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="panel-title">Live context timeline</h2>
                 <p className="panel-copy">
-                  Compression events, proxy traffic, Codex turns, and distilled rules.
+                  All proxy traffic — dashboard runs and terminal{" "}
+                  <code>codex</code> CLI calls. Updates every 1.5s.
                 </p>
               </div>
-              <Activity className="text-[#627067]" size={22} />
+              <LiveIndicator status={liveStatus} />
             </div>
             <div className="timeline">
               {events.length === 0 ? (
@@ -245,7 +314,9 @@ export function App() {
               <div>
                 <h2 className="panel-title">Active playbook</h2>
                 <p className="panel-copy">
-                  Approve constraints to inject into future Codex turns.
+                  {metrics.approvedRules > 0
+                    ? `${metrics.approvedRules} rule${metrics.approvedRules === 1 ? "" : "s"} auto-injected into every Codex turn.`
+                    : "Approved rules are injected into every future Codex turn."}
                 </p>
               </div>
               <Sparkles className="text-[#9db92d]" size={22} />
@@ -272,7 +343,100 @@ export function App() {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
+function DemoImpactPanel({ result }: { result: DemoRunResult }) {
+  const itemDelta = result.phase2.items - result.phase1.items;
+  const durationDeltaSec = (result.phase1.durationMs - result.phase2.durationMs) / 1000;
+  return (
+    <section className="mb-5 rounded-xl border-2 border-[#9db92d] bg-gradient-to-br from-[#f4fbe1] to-[#fffdf7] p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-[#1d2528]">Demo impact</h2>
+          <p className="text-xs text-[#5f6868]">
+            Same task, run twice — before and after the proxy learned the project's constraint.
+          </p>
+        </div>
+        <Sparkles className="text-[#9db92d]" size={26} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <ImpactColumn
+          tone="rose"
+          label="Phase 1 — without memory"
+          subtitle={result.phase1.rulesCreated ? `${result.phase1.rulesCreated} rule(s) extracted` : "No rules in playbook"}
+          response={result.phase1.finalResponse}
+          stats={[
+            { label: "Items", value: result.phase1.items.toString() },
+            { label: "Duration", value: `${(result.phase1.durationMs / 1000).toFixed(1)}s` }
+          ]}
+        />
+        <ImpactColumn
+          tone="lime"
+          label="Phase 2 — with memory"
+          subtitle="Approved rules auto-injected"
+          response={result.phase2.finalResponse}
+          stats={[
+            { label: "Items", value: result.phase2.items.toString() },
+            { label: "Duration", value: `${(result.phase2.durationMs / 1000).toFixed(1)}s` }
+          ]}
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 rounded bg-white/70 p-2 text-xs">
+        <span className="font-semibold uppercase tracking-wider text-[#5f6868]">Δ Result</span>
+        <span className="rounded bg-[#e9f9a8] px-2 py-0.5 font-mono">
+          {itemDelta < 0 ? `${itemDelta}` : `+${itemDelta}`} items
+        </span>
+        <span className="rounded bg-[#e9f9a8] px-2 py-0.5 font-mono">
+          {durationDeltaSec >= 0 ? `${durationDeltaSec.toFixed(1)}s faster` : `${(-durationDeltaSec).toFixed(1)}s slower`}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function ImpactColumn({
+  tone,
+  label,
+  subtitle,
+  response,
+  stats
+}: {
+  tone: "rose" | "lime";
+  label: string;
+  subtitle: string;
+  response: string;
+  stats: Array<{ label: string; value: string }>;
+}) {
+  const bg = tone === "rose" ? "bg-[#ffe0d9]" : "bg-[#e9f9a8]";
+  const accent = tone === "rose" ? "text-[#8b2c13]" : "text-[#5d7517]";
+  return (
+    <div className={`${bg} rounded border border-black/10 p-3`}>
+      <div className={`text-xs font-bold uppercase ${accent}`}>{label}</div>
+      <div className="text-[10px] text-[#5f6868]">{subtitle}</div>
+      <div className="mt-2 grid grid-cols-2 gap-1">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded bg-white/70 px-2 py-1 text-xs">
+            <div className="text-[10px] uppercase text-[#5f6868]">{s.label}</div>
+            <div className="font-mono font-semibold tabular-nums">{s.value}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 line-clamp-4 max-h-24 overflow-hidden text-xs leading-5 text-[#263033]">
+        {response}
+      </p>
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  tone,
+  highlight = false
+}: {
+  label: string;
+  value: number;
+  tone: string;
+  highlight?: boolean;
+}) {
   const toneClass =
     tone === "emerald"
       ? "bg-[#dff5df]"
@@ -280,33 +444,58 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
         ? "bg-[#ffe0d9]"
         : tone === "lime"
           ? "bg-[#e9f9a8]"
-          : "bg-[#ece5d8]";
+          : tone === "amber"
+            ? "bg-[#ffe8b3]"
+            : "bg-[#ece5d8]";
   return (
-    <div className={`${toneClass} min-w-32 rounded border border-black/10 px-4 py-3`}>
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+    <div
+      className={`${toneClass} ${highlight ? "ring-2 ring-[#9db92d]/40" : ""} min-w-32 rounded border border-black/10 px-4 py-3 transition-all`}
+    >
+      <div className="text-2xl font-semibold tabular-nums">{value.toLocaleString()}</div>
       <div className="text-xs font-medium uppercase text-[#5f6868]">{label}</div>
     </div>
   );
 }
 
-const COMPRESSION_CHIP_CLASS =
-  "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#fff3cd] text-[#7a5c00] border border-[#ffe08a]";
+function LiveIndicator({ status }: { status: "idle" | "live" | "connected" }) {
+  const color =
+    status === "live"
+      ? "bg-[#22c55e]"
+      : status === "connected"
+        ? "bg-[#9db92d]"
+        : "bg-[#cbd5d0]";
+  const label = status === "idle" ? "WAITING" : status === "live" ? "LIVE" : "CONNECTED";
+  return (
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#627067]">
+      <div className="relative flex size-2.5">
+        {status !== "idle" && (
+          <span className={`absolute inline-flex size-full animate-ping rounded-full ${color} opacity-60`} />
+        )}
+        <span className={`relative inline-flex size-2.5 rounded-full ${color}`} />
+      </div>
+      {label}
+      <Activity className="text-[#627067]" size={16} />
+    </div>
+  );
+}
 
 function TimelineRow({ event }: { event: TimelineEvent }) {
-  const isCompression = event.category === "compression_result";
+  const styling = chipStyleForCategory(event.category);
+  const meta = event.metadata as Record<string, unknown>;
+
+  if (event.category === "proxy_request") {
+    return <ProxyRequestRow event={event} meta={meta} />;
+  }
+
   return (
     <article className="timeline-row">
-      <div className={`timeline-dot ${isCompression ? "bg-[#f59e0b]" : ""}`} />
+      <div className={`timeline-dot ${styling.dotClass}`} />
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          {isCompression ? (
-            <span className={COMPRESSION_CHIP_CLASS}>
-              <Zap size={10} />
-              {event.category.replace("_", " ")}
-            </span>
-          ) : (
-            <span className="event-chip">{event.category.replace("_", " ")}</span>
-          )}
+          <span className={styling.chipClass}>
+            {styling.icon}
+            {event.category.replace(/_/g, " ")}
+          </span>
           <time className="text-xs text-[#747b76]">
             {new Date(event.createdAt).toLocaleTimeString()}
           </time>
@@ -316,6 +505,125 @@ function TimelineRow({ event }: { event: TimelineEvent }) {
       </div>
     </article>
   );
+}
+
+function ProxyRequestRow({
+  event,
+  meta
+}: {
+  event: TimelineEvent;
+  meta: Record<string, unknown>;
+}) {
+  const originalSize = Number(meta["originalSize"] ?? 0);
+  const finalSize = Number(meta["finalSize"] ?? 0);
+  const tokensRemoved = Number(meta["tokensRemoved"] ?? 0);
+  const compressions = Number(meta["compressions"] ?? 0);
+  const injectedRules = Number(meta["injectedRules"] ?? 0);
+  const sizeDelta = finalSize - originalSize;
+  const hasTransform = compressions > 0 || injectedRules > 0;
+
+  return (
+    <article className="timeline-row">
+      <div className={`timeline-dot ${hasTransform ? "bg-[#22c55e]" : "bg-[#cbd5d0]"}`} />
+      <div className="min-w-0">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <span className="event-chip bg-[#dff5df] text-[#1f6f3a]">proxy request</span>
+          <time className="text-xs text-[#747b76]">
+            {new Date(event.createdAt).toLocaleTimeString()}
+          </time>
+        </div>
+        <h3 className="font-mono text-sm font-semibold">{event.title}</h3>
+
+        {originalSize > 0 ? (
+          <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+            <SizeCell label="Before" value={`${originalSize.toLocaleString()} ch`} tone="stone" />
+            <SizeCell
+              label="Δ"
+              value={`${sizeDelta >= 0 ? "+" : ""}${sizeDelta.toLocaleString()}`}
+              tone={sizeDelta < 0 ? "lime" : sizeDelta > 0 ? "amber" : "stone"}
+            />
+            <SizeCell label="After" value={`${finalSize.toLocaleString()} ch`} tone="emerald" />
+          </div>
+        ) : null}
+
+        {hasTransform ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {compressions > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded bg-[#fff3cd] px-2 py-1 text-xs font-medium text-[#7a5c00]">
+                <Zap size={12} />
+                Compressed {compressions} (~{tokensRemoved.toLocaleString()} tok)
+              </span>
+            ) : null}
+            {injectedRules > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded bg-[#e9f9a8] px-2 py-1 text-xs font-medium text-[#5d7517]">
+                <Sparkles size={12} />
+                Injected {injectedRules} rule{injectedRules === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-1 text-xs italic text-[#8b918b]">Forwarded unchanged.</p>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function SizeCell({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: string;
+  tone: "stone" | "emerald" | "lime" | "amber";
+}) {
+  const toneBg =
+    tone === "emerald"
+      ? "bg-[#dff5df]"
+      : tone === "lime"
+        ? "bg-[#e9f9a8]"
+        : tone === "amber"
+          ? "bg-[#ffe8b3]"
+          : "bg-[#ece5d8]";
+  return (
+    <div className={`${toneBg} rounded border border-black/5 px-2 py-1`}>
+      <div className="text-[10px] font-semibold uppercase text-[#5f6868]">{label}</div>
+      <div className="font-mono text-xs tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function chipStyleForCategory(category: string): {
+  chipClass: string;
+  dotClass: string;
+  icon: React.ReactNode;
+} {
+  switch (category) {
+    case "compression_result":
+      return {
+        chipClass:
+          "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#fff3cd] text-[#7a5c00] border border-[#ffe08a]",
+        dotClass: "bg-[#f59e0b]",
+        icon: <Zap size={10} />
+      };
+    case "proxy_injection":
+    case "rule_auto_approved":
+      return {
+        chipClass:
+          "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#e9f9a8] text-[#5d7517] border border-[#cfe065]",
+        dotClass: "bg-[#9db92d]",
+        icon: <Sparkles size={10} />
+      };
+    case "rule_candidate":
+      return {
+        chipClass: "event-chip bg-[#ffe0d9] text-[#8b2c13]",
+        dotClass: "bg-[#dc2626]",
+        icon: null
+      };
+    default:
+      return { chipClass: "event-chip", dotClass: "", icon: null };
+  }
 }
 
 function RuleGroup({
@@ -372,12 +680,12 @@ function RuleGroup({
 function EmptyState() {
   return (
     <div className="grid h-[520px] place-items-center rounded border border-dashed border-[#d7d0c2] bg-white/45 text-center">
-      <div className="max-w-sm px-6">
-        <CircleAlert className="mx-auto mb-3 text-[#8b918b]" />
-        <h3 className="font-semibold">No Codex traffic yet</h3>
+      <div className="max-w-md px-6">
+        <Activity className="mx-auto mb-3 text-[#9db92d]" size={32} />
+        <h3 className="text-base font-semibold">Waiting for Codex traffic…</h3>
         <p className="mt-2 text-sm leading-6 text-[#66706c]">
-          Run <strong>Teach memory</strong> to watch Signal Recycler compress noise, distill a
-          failure into a rule, and inject the playbook into the next turn.
+          Press <strong>Run learn → use demo</strong> on the left for a guided arc, or send a free
+          prompt, or pipe your terminal codex CLI through the proxy.
         </p>
       </div>
     </div>
