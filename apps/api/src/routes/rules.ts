@@ -59,8 +59,15 @@ export async function registerRuleRoutes(
 
   app.get("/api/rules", async () => options.store.listRules(projectId));
 
-  app.post("/api/rules", async (request) => {
+  app.post("/api/rules", async (request, reply) => {
     const parsed = createManualRuleRequestSchema.parse(request.body ?? {});
+    if (parsed.memoryType !== "rule") {
+      return reply.code(400).send({
+        error: "Invalid memoryType",
+        message: '/api/rules only accepts memoryType "rule"'
+      });
+    }
+
     const rule = options.store.createRuleCandidate({
       projectId,
       category: parsed.category,

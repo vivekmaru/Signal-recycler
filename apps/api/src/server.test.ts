@@ -111,9 +111,17 @@ describe("api", () => {
       payload: { prompt: "Phase 1" }
     });
     const events = await app.inject({ method: "GET", url: `/api/sessions/${id}/events` });
-    const candidate = run.json().candidateRules[0];
+    const body = run.json();
 
     expect(run.statusCode).toBe(200);
+    expect(body.candidateRules).toEqual([
+      expect.objectContaining({
+        category: expect.any(String),
+        rule: expect.any(String),
+        reason: expect.any(String)
+      })
+    ]);
+    const candidate = body.candidateRules[0];
     expect(candidate.source).toMatchObject({
       kind: "event",
       sessionId: id,
@@ -157,6 +165,37 @@ describe("api", () => {
     });
   });
 
+  it("creates synced memories with synced file provenance", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memories/synced",
+      payload: {
+        category: "project-context",
+        rule: "Follow the signal recycler section in AGENTS.md.",
+        reason: "Imported from repository agent instructions.",
+        path: "AGENTS.md",
+        section: "signal-recycler"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "approved",
+      memoryType: "synced_file",
+      source: { kind: "synced_file", path: "AGENTS.md", section: "signal-recycler" },
+      syncStatus: "imported"
+    });
+  });
+
   it("creates a manually approved playbook rule", async () => {
     const app = await createApp({
       ...TEST_APP_OPTIONS,
@@ -182,6 +221,33 @@ describe("api", () => {
       category: "frontend",
       rule: "For frontend tasks, never modify apps/api unless explicitly asked.",
       reason: "Manual guardrail before running a broad UI prompt."
+    });
+  });
+
+  it("rejects non-rule memory types on the legacy rules endpoint", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/rules",
+      payload: {
+        category: "frontend",
+        rule: "Prefer compact controls for dense operational screens.",
+        reason: "Legacy rule endpoint only accepts rule memories.",
+        memoryType: "preference"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memoryType",
+      message: "/api/rules only accepts memoryType \"rule\""
     });
   });
 
