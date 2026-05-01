@@ -32,7 +32,7 @@ describe("store", () => {
     const store = createStore(":memory:");
     const internals = store.inspectSchema();
 
-    expect(internals.schemaVersion).toBe(1);
+    expect(internals.schemaVersion).toBe(2);
     expect(internals.indexes).toEqual(
       expect.arrayContaining([
         "idx_sessions_project_created",
@@ -41,5 +41,27 @@ describe("store", () => {
         "idx_rules_project_status_approved"
       ])
     );
+  });
+
+  it("migrates rule rows into memory records with provenance defaults", () => {
+    const store = createStore(":memory:");
+
+    const candidate = store.createRuleCandidate({
+      projectId: "demo",
+      category: "package-manager",
+      rule: "Use pnpm for package management.",
+      reason: "The workspace is configured for pnpm.",
+      sourceEventId: null
+    });
+
+    expect(store.inspectSchema().schemaVersion).toBe(2);
+    expect(candidate.memoryType).toBe("rule");
+    expect(candidate.scope).toEqual({ type: "project", value: null });
+    expect(candidate.source).toEqual({ kind: "manual", author: "local-user" });
+    expect(candidate.confidence).toBe("medium");
+    expect(candidate.lastUsedAt).toBeNull();
+    expect(candidate.supersededBy).toBeNull();
+    expect(candidate.syncStatus).toBe("local");
+    expect(candidate.updatedAt).toBe(candidate.createdAt);
   });
 });

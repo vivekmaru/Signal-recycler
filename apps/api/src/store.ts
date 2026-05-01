@@ -1,9 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
 import {
   type EventCategory,
+  type MemoryConfidence,
+  type MemoryScope,
+  type MemorySource,
+  type MemorySyncStatus,
+  type MemoryType,
   type PlaybookRule,
   type SessionRecord,
-  type TimelineEvent
+  type TimelineEvent,
+  memoryScopeSchema,
+  memorySourceSchema
 } from "@signal-recycler/shared";
 
 type CreateRuleInput = {
@@ -12,6 +19,11 @@ type CreateRuleInput = {
   rule: string;
   reason: string;
   sourceEventId?: string | null;
+  memoryType?: MemoryType;
+  scope?: MemoryScope;
+  source?: MemorySource;
+  confidence?: MemoryConfidence;
+  syncStatus?: MemorySyncStatus;
 };
 
 type CreateSessionInput = {
@@ -81,6 +93,8 @@ export function createStore(path: string) {
       ON rules (project_id, status, approved_at ASC);
   `);
 
+  migrateSchema(db);
+
   return {
     createSession(input: CreateSessionInput): SessionRecord {
       const session: SessionRecord = {
@@ -146,6 +160,7 @@ export function createStore(path: string) {
     },
 
     createRuleCandidate(input: CreateRuleInput): PlaybookRule {
+      const timestamp = now();
       const rule: PlaybookRule = {
         id: createId("rule"),
         projectId: input.projectId,
@@ -154,11 +169,22 @@ export function createStore(path: string) {
         rule: input.rule,
         reason: input.reason,
         sourceEventId: input.sourceEventId ?? null,
-        createdAt: now(),
-        approvedAt: null
+        createdAt: timestamp,
+        approvedAt: null,
+        memoryType: input.memoryType ?? "rule",
+        scope: input.scope ?? { type: "project", value: null },
+        source: input.source ?? defaultMemorySource(input.sourceEventId ?? null),
+        confidence: input.confidence ?? "medium",
+        lastUsedAt: null,
+        supersededBy: null,
+        syncStatus: input.syncStatus ?? "local",
+        updatedAt: timestamp
       };
       db.prepare(
-        "INSERT INTO rules (id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        `INSERT INTO rules (
+          id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at,
+          memory_type, scope, source, confidence, last_used_at, superseded_by, sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         rule.id,
         rule.projectId,
@@ -168,7 +194,15 @@ export function createStore(path: string) {
         rule.reason,
         rule.sourceEventId,
         rule.createdAt,
-        rule.approvedAt
+        rule.approvedAt,
+        rule.memoryType,
+        JSON.stringify(rule.scope),
+        JSON.stringify(rule.source),
+        rule.confidence,
+        rule.lastUsedAt,
+        rule.supersededBy,
+        rule.syncStatus,
+        rule.updatedAt
       );
       return rule;
     },
@@ -283,6 +317,47 @@ export function createStore(path: string) {
   };
 }
 
+function migrateSchema(db: DatabaseSync): void {
+  const versionRow = db
+    .prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+    .get() as { value?: string } | undefined;
+  const version = Number(versionRow?.value ?? 1);
+
+  if (version < 2) {
+    db.exec(`
+      ALTER TABLE rules ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'rule';
+      ALTER TABLE rules ADD COLUMN scope TEXT NOT NULL DEFAULT '{"type":"project","value":null}';
+      ALTER TABLE rules ADD COLUMN source TEXT NOT NULL DEFAULT '{"kind":"manual","author":"local-user"}';
+      ALTER TABLE rules ADD COLUMN confidence TEXT NOT NULL DEFAULT 'medium';
+      ALTER TABLE rules ADD COLUMN last_used_at TEXT;
+      ALTER TABLE rules ADD COLUMN superseded_by TEXT;
+      ALTER TABLE rules ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'local';
+      ALTER TABLE rules ADD COLUMN updated_at TEXT;
+      UPDATE rules SET updated_at = created_at WHERE updated_at IS NULL;
+      UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
+    `);
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_usages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      memory_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      adapter TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      injected_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_usages_memory_injected
+      ON memory_usages (memory_id, injected_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_memory_usages_project_injected
+      ON memory_usages (project_id, injected_at DESC);
+  `);
+}
+
 function dedupeRules(rules: PlaybookRule[]): PlaybookRule[] {
   const seen = new Set<string>();
   return rules.filter((rule) => {
@@ -299,6 +374,22 @@ function createId(prefix: string): string {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function defaultMemorySource(sourceEventId: string | null): MemorySource {
+  if (sourceEventId) {
+    return { kind: "event", sessionId: "unknown", eventId: sourceEventId };
+  }
+  return { kind: "manual", author: "local-user" };
+}
+
+function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function mapSession(row: Record<string, unknown>): SessionRecord {
@@ -323,6 +414,13 @@ function mapEvent(row: Record<string, unknown>): TimelineEvent {
 }
 
 function mapRule(row: Record<string, unknown>): PlaybookRule {
+  const scope = memoryScopeSchema.parse(
+    parseJsonColumn(row.scope, { type: "project", value: null })
+  );
+  const source = memorySourceSchema.parse(
+    parseJsonColumn(row.source, { kind: "manual", author: "local-user" })
+  );
+
   return {
     id: String(row.id),
     projectId: String(row.project_id),
@@ -332,6 +430,20 @@ function mapRule(row: Record<string, unknown>): PlaybookRule {
     reason: String(row.reason),
     sourceEventId: row.source_event_id === null ? null : String(row.source_event_id),
     createdAt: String(row.created_at),
-    approvedAt: row.approved_at === null ? null : String(row.approved_at)
+    approvedAt: row.approved_at === null ? null : String(row.approved_at),
+    memoryType: String(row.memory_type ?? "rule") as PlaybookRule["memoryType"],
+    scope,
+    source,
+    confidence: String(row.confidence ?? "medium") as PlaybookRule["confidence"],
+    lastUsedAt:
+      row.last_used_at === null || row.last_used_at === undefined
+        ? null
+        : String(row.last_used_at),
+    supersededBy:
+      row.superseded_by === null || row.superseded_by === undefined
+        ? null
+        : String(row.superseded_by),
+    syncStatus: String(row.sync_status ?? "local") as PlaybookRule["syncStatus"],
+    updatedAt: String(row.updated_at ?? row.created_at)
   };
 }
