@@ -290,6 +290,8 @@ Success criteria:
 
 Make evals the product spine before broadening the architecture.
 
+Implementation plan: `docs/superpowers/plans/2026-05-01-phase-1-isolated-product-evals.md`.
+
 Success criteria:
 
 - `pnpm eval` runs local deterministic evals without OpenAI calls.
