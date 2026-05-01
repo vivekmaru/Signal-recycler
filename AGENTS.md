@@ -20,6 +20,8 @@ Signal Recycler remains the runtime source of truth for memory. `AGENTS.md` and 
 - For phase work, treat the explicit phase heading and success criteria in `docs/validation-roadmap.md` as the binding scope. Long-term product direction can inform design, but it must not rename, expand, or reorder the current phase without user approval.
 - Name phase branches from the explicit phase title, not from future-phase architecture terms. Example: Phase 3 "Retrieval Before More Memory Creation" should use a retrieval-focused branch name, not an owned-session or context-envelope branch name.
 - Before writing a phase spec or implementation plan, include a short "scope anchor" that quotes or paraphrases the roadmap phase goal, success criteria, and explicit out-of-scope next-phase items.
+- When using Superpowers planning workflows, follow the gates explicitly: do not create a design spec unless the brainstorming workflow calls for one, do not create the implementation plan until the spec/review gate is satisfied, and always end planning by asking whether to use Subagent-Driven or Inline Execution.
+- If the user asks directly to "plan" an already-scoped phase, create the implementation plan first. Add a separate design spec only when the phase has unresolved architecture choices or the user asks for one.
 - Preserve local-first behavior by default.
 - Treat memory provenance and project isolation as correctness requirements, not polish.
 - When a review surfaces a residual risk, either fix it in the branch or record it in the follow-up backlog with enough detail to be actionable.
