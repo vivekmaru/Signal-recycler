@@ -30,6 +30,7 @@ const app = await createApp({
   store,
   projectId,
   workingDirectory,
+  databasePath: dbPath,
   codexRunner: createCodexRunner({ store, apiPort: port, projectId, workingDirectory })
 });
 

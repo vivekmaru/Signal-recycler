@@ -29,6 +29,12 @@ export async function registerSessionRoutes(
 
   app.get("/api/sessions", async () => options.store.listSessions());
 
+  app.get("/api/firehose/events", async (request) => {
+    const { limit: rawLimit } = request.query as { limit?: string };
+    const limit = Number(rawLimit ?? 100);
+    return options.store.listAllEvents(Number.isFinite(limit) ? limit : 100);
+  });
+
   app.post("/api/sessions/:id/run", async (request, reply) => {
     const { id } = request.params as { id: string };
     const session = options.store.getSession(id);

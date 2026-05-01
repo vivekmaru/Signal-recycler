@@ -36,6 +36,59 @@ describe("api", () => {
     });
   });
 
+  it("returns smoke database metadata in config", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      databasePath: "/tmp/signal-recycler-smoke.sqlite",
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/config" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      database: {
+        basename: "signal-recycler-smoke.sqlite",
+        isSmoke: true
+      }
+    });
+  });
+
+  it("returns recent events through the firehose endpoint", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Firehose"
+    });
+    store.createEvent({
+      sessionId: session.id,
+      category: "codex_event",
+      title: "Tracked event",
+      body: "Visible in dashboard firehose"
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=10" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        sessionId: session.id,
+        category: "codex_event",
+        title: "Tracked event"
+      })
+    ]);
+  });
+
   it("creates rule candidates during a run and emits ordered events", async () => {
     const store = createStore(":memory:");
     const app = await createApp({

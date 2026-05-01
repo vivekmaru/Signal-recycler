@@ -1,14 +1,5 @@
 const base = process.env.SIGNAL_RECYCLER_API_URL ?? "http://127.0.0.1:3001";
 
-if (
-  !process.env.SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB &&
-  !process.env.SIGNAL_RECYCLER_DB?.includes("smoke")
-) {
-  throw new Error(
-    "Refusing to run smoke demo against a non-smoke database. Start the API with SIGNAL_RECYCLER_DB pointing at a temporary smoke database, or set SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB=1."
-  );
-}
-
 async function request(path, options = {}) {
   const headers = { ...(options.headers ?? {}) };
   if (options.body !== undefined) {
@@ -26,6 +17,14 @@ async function request(path, options = {}) {
 
   const contentType = response.headers.get("content-type") ?? "";
   return contentType.includes("application/json") ? response.json() : response.text();
+}
+
+const config = await request("/api/config");
+if (!process.env.SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB && !config.database?.isSmoke) {
+  const databaseName = config.database?.basename ?? "unknown database";
+  throw new Error(
+    `Refusing to run smoke demo against ${databaseName}. Start the API with SIGNAL_RECYCLER_DB pointing at a temporary smoke database, or set SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB=1.`
+  );
 }
 
 const session = await request("/api/sessions", {

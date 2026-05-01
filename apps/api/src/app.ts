@@ -16,6 +16,7 @@ type AppOptions = {
   codexRunner: CodexRunner;
   projectId: string;
   workingDirectory: string;
+  databasePath?: string;
   upstreamBaseUrl?: string;
 };
 
@@ -61,11 +62,18 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.get("/health", async () => ({ ok: true }));
 
-  app.get("/api/config", async () => ({
-    projectId,
-    workingDirectory,
-    workingDirectoryBasename: path.basename(workingDirectory)
-  }));
+  app.get("/api/config", async () => {
+    const databasePath = options.databasePath ?? "";
+    return {
+      projectId,
+      workingDirectory,
+      workingDirectoryBasename: path.basename(workingDirectory),
+      database: {
+        basename: databasePath ? path.basename(databasePath) : null,
+        isSmoke: databasePath.includes("smoke")
+      }
+    };
+  });
 
   await registerSessionRoutes(app, options);
   await registerDemoRoutes(app, options);
