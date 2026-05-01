@@ -1,6 +1,6 @@
 import { classifyTurn } from "../classifier.js";
-import { type CodexRunner } from "../app.js";
 import { type SignalRecyclerStore } from "../store.js";
+import { type CodexRunner } from "../types.js";
 
 export type ProcessTurnInput = {
   store: SignalRecyclerStore;

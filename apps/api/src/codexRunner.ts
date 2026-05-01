@@ -1,7 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
 import { injectPlaybookRules } from "./playbook.js";
 import { type SignalRecyclerStore } from "./store.js";
-import { type CodexRunner } from "./app.js";
+import { type CodexRunner } from "./types.js";
 
 type ThreadLike = {
   run(prompt: string): Promise<{ finalResponse?: string; items?: unknown[] }>;
