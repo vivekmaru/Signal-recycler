@@ -111,11 +111,50 @@ describe("api", () => {
       payload: { prompt: "Phase 1" }
     });
     const events = await app.inject({ method: "GET", url: `/api/sessions/${id}/events` });
+    const candidate = run.json().candidateRules[0];
 
     expect(run.statusCode).toBe(200);
+    expect(candidate.source).toMatchObject({
+      kind: "event",
+      sessionId: id,
+      eventId: expect.stringMatching(/^event_/)
+    });
+    expect(candidate.confidence).toBe("high");
     expect(events.json().map((event: { category: string }) => event.category)).toEqual(
       expect.arrayContaining(["codex_event", "classifier_result", "rule_candidate"])
     );
+  });
+
+  it("creates manual memories with manual provenance", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memories",
+      payload: {
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The repository uses pnpm workspaces.",
+        memoryType: "command_convention",
+        scope: { type: "project", value: null }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "approved",
+      memoryType: "command_convention",
+      source: { kind: "manual", author: "local-user" },
+      syncStatus: "local"
+    });
   });
 
   it("creates a manually approved playbook rule", async () => {

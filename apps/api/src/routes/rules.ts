@@ -1,5 +1,9 @@
 import { type FastifyInstance } from "fastify";
-import { createManualRuleRequestSchema } from "@signal-recycler/shared";
+import {
+  createManualMemoryRequestSchema,
+  createManualRuleRequestSchema,
+  createSyncedMemoryRequestSchema
+} from "@signal-recycler/shared";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
 
@@ -17,6 +21,42 @@ export async function registerRuleRoutes(
 ): Promise<void> {
   const { projectId } = options;
 
+  app.get("/api/memories", async () => options.store.listRules(projectId));
+
+  app.post("/api/memories", async (request) => {
+    const parsed = createManualMemoryRequestSchema.parse(request.body ?? {});
+    const memory = options.store.createRuleCandidate({
+      projectId,
+      category: parsed.category,
+      rule: parsed.rule,
+      reason: parsed.reason,
+      memoryType: parsed.memoryType,
+      scope: parsed.scope,
+      source: { kind: "manual", author: "local-user" },
+      confidence: "high",
+      syncStatus: "local",
+      sourceEventId: null
+    });
+    return options.store.approveRule(memory.id);
+  });
+
+  app.post("/api/memories/synced", async (request) => {
+    const parsed = createSyncedMemoryRequestSchema.parse(request.body ?? {});
+    const memory = options.store.createRuleCandidate({
+      projectId,
+      category: parsed.category,
+      rule: parsed.rule,
+      reason: parsed.reason,
+      memoryType: "synced_file",
+      scope: parsed.scope,
+      source: { kind: "synced_file", path: parsed.path, section: parsed.section },
+      confidence: "high",
+      syncStatus: "imported",
+      sourceEventId: null
+    });
+    return options.store.approveRule(memory.id);
+  });
+
   app.get("/api/rules", async () => options.store.listRules(projectId));
 
   app.post("/api/rules", async (request) => {
@@ -26,6 +66,11 @@ export async function registerRuleRoutes(
       category: parsed.category,
       rule: parsed.rule,
       reason: parsed.reason,
+      memoryType: "rule",
+      scope: parsed.scope,
+      source: { kind: "manual", author: "local-user" },
+      confidence: "high",
+      syncStatus: "local",
       sourceEventId: null
     });
     return options.store.approveRule(rule.id);

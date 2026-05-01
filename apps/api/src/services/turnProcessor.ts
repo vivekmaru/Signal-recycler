@@ -51,7 +51,12 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
       category: candidate.category,
       rule: candidate.rule,
       reason: candidate.reason,
-      sourceEventId: codexEvent.id
+      sourceEventId: codexEvent.id,
+      source: { kind: "event", sessionId: input.sessionId, eventId: codexEvent.id },
+      confidence: candidate.confidence,
+      memoryType: "rule",
+      scope: { type: "project", value: null },
+      syncStatus: "local"
     });
 
     input.store.createEvent({
