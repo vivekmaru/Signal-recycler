@@ -132,6 +132,52 @@ describe("store", () => {
     expect(store.listMemoryUsages(memory.id)).toEqual([usage]);
   });
 
+  it("lists memory usages scoped to a project", () => {
+    const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-store-")), "test.sqlite");
+    const store = createStore(databasePath);
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const event = store.createEvent({
+      sessionId: "session_1",
+      category: "memory_injection",
+      title: "Injected memory",
+      body: "Injected 1 memory.",
+      metadata: { projectId: "demo", memoryIds: [memory.id] }
+    });
+    const usage = store.recordMemoryUsage({
+      projectId: "demo",
+      memoryId: memory.id,
+      sessionId: "session_1",
+      eventId: event.id,
+      adapter: "proxy",
+      reason: "approved_project_memory"
+    });
+    const db = new DatabaseSync(databasePath);
+    db.prepare(
+      `INSERT INTO memory_usages (
+        id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "usage_other_project",
+      "other",
+      memory.id,
+      "other-session",
+      "other-event",
+      "proxy",
+      "other_project_memory",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.close();
+
+    expect(store.listMemoryUsagesForProject("demo", memory.id)).toEqual([usage]);
+  });
+
   it("does not record memory usage for nonexistent memory", () => {
     const store = createStore(":memory:");
 

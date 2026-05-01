@@ -328,6 +328,15 @@ export function createStore(path: string) {
         .map(mapMemoryUsage);
     },
 
+    listMemoryUsagesForProject(projectId: string, memoryId: string): MemoryUsage[] {
+      return db
+        .prepare(
+          "SELECT * FROM memory_usages WHERE project_id = ? AND memory_id = ? ORDER BY injected_at DESC, id DESC"
+        )
+        .all(projectId, memoryId)
+        .map(mapMemoryUsage);
+    },
+
     supersedeRule(id: string, replacementId: string): PlaybookRule {
       if (id === replacementId) throw new Error(`Rule cannot supersede itself: ${id}`);
       const original = this.getRule(id);

@@ -65,7 +65,7 @@ export async function registerRuleRoutes(
     }
     return {
       memory,
-      usages: options.store.listMemoryUsages(id)
+      usages: options.store.listMemoryUsagesForProject(projectId, id)
     };
   });
 

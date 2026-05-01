@@ -1,3 +1,7 @@
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
@@ -198,7 +202,8 @@ describe("api", () => {
   });
 
   it("returns memory audit trail with source and usages", async () => {
-    const store = createStore(":memory:");
+    const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-api-")), "test.sqlite");
+    const store = createStore(databasePath);
     const app = await createApp({
       projectId: "demo",
       workingDirectory: "/tmp/demo",
@@ -232,6 +237,22 @@ describe("api", () => {
       adapter: "proxy",
       reason: "approved_project_memory"
     });
+    const db = new DatabaseSync(databasePath);
+    db.prepare(
+      `INSERT INTO memory_usages (
+        id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "usage_other_project",
+      "other",
+      memory.id,
+      "other-session",
+      "other-event",
+      "proxy",
+      "other_project_memory",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.close();
 
     const response = await app.inject({
       method: "GET",
@@ -239,10 +260,21 @@ describe("api", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    const body = response.json();
+    expect(body).toMatchObject({
       memory: { id: memory.id, source: { kind: "manual", author: "local-user" } },
-      usages: [{ memoryId: memory.id, adapter: "proxy" }]
+      usages: [
+        {
+          projectId: "demo",
+          memoryId: memory.id,
+          sessionId: "proxy",
+          eventId: event.id,
+          adapter: "proxy",
+          reason: "approved_project_memory"
+        }
+      ]
     });
+    expect(body.usages).toHaveLength(1);
   });
 
   it("returns 404 for a memory audit trail outside the current project", async () => {
@@ -269,6 +301,25 @@ describe("api", () => {
     const response = await app.inject({
       method: "GET",
       url: `/api/memories/${memory.id}/audit`
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: "Memory not found" });
+  });
+
+  it("returns 404 for a missing memory audit trail", async () => {
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/memories/does-not-exist/audit"
     });
 
     expect(response.statusCode).toBe(404);
