@@ -141,6 +141,8 @@ http://127.0.0.1:3001
 | `SIGNAL_RECYCLER_UPSTREAM_URL` | No | `https://api.openai.com` | Upstream OpenAI-compatible API target. Do not set this to the proxy URL. |
 | `SIGNAL_RECYCLER_LOG_LEVEL` | No | unset | Set to `info` or `error` when debugging server behavior. |
 | `SIGNAL_RECYCLER_MOCK_CODEX` | No | `0` | Set to `1` for UI-only demos without live Codex/OpenAI calls. |
+| `SIGNAL_RECYCLER_LIVE_AGENT` | No | unset | Optional eval-only adapter selector for `pnpm eval:live`. Supported values: `codex`, `claude`. |
+| `SIGNAL_RECYCLER_LIVE_AGENT_TIMEOUT_MS` | No | `120000` | Timeout for the optional live agent eval. |
 
 ## Use with any project
 
@@ -226,6 +228,40 @@ pnpm smoke:demo
 ```
 
 `pnpm smoke:demo` expects the API to be running against a smoke/test database unless `SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB=1` is set explicitly.
+
+## Product evals
+
+Phase 1 adds local evals so Signal Recycler can measure product claims without relying on the demo script.
+
+```bash
+pnpm eval
+```
+
+The local eval command does not call OpenAI. It runs deterministic suites for:
+
+- compression retention and token savings
+- rule extraction precision and recall
+- playbook injection placement and dedupe
+- project isolation
+- with-memory versus without-memory task outcome
+- stale-memory failure exposure
+
+Reports are written to `.signal-recycler/evals/latest.json` and `.signal-recycler/evals/latest.md`.
+
+Optional live agent-backed evals are separate:
+
+```bash
+pnpm eval:live
+```
+
+By default, the live suite reports `skip`. To run it against an authenticated local CLI, set `SIGNAL_RECYCLER_LIVE_AGENT` to a supported adapter:
+
+```bash
+SIGNAL_RECYCLER_LIVE_AGENT=codex pnpm eval:live
+SIGNAL_RECYCLER_LIVE_AGENT=claude pnpm eval:live
+```
+
+The live eval path is intentionally agent-adapter oriented. `OPENAI_API_KEY` is not required for the default Phase 1 live eval.
 
 ## Notes
 

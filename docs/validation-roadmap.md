@@ -292,6 +292,8 @@ Make evals the product spine before broadening the architecture.
 
 Implementation plan: `docs/superpowers/plans/2026-05-01-phase-1-isolated-product-evals.md`.
 
+Current status: implemented locally with deterministic eval reports under `.signal-recycler/evals/`.
+
 Success criteria:
 
 - `pnpm eval` runs local deterministic evals without OpenAI calls.
