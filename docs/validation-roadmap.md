@@ -305,6 +305,8 @@ Success criteria:
 
 Generalize from Codex playbook rules to agent/app memories with provenance.
 
+Implementation plan: `docs/superpowers/plans/2026-05-01-phase-2-memory-model-audit-trail.md`
+
 Success criteria:
 
 - Memory records support type, scope, source, confidence, created_at, last_used_at, superseded_by, and sync status.
