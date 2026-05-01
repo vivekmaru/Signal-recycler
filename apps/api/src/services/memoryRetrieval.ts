@@ -20,22 +20,35 @@ export function retrieveRelevantMemories(
 ): MemoryRetrievalResult & { memories: MemoryRecord[] } {
   const limit = normalizeLimit(input.limit);
   const approved = input.store.listApprovedRules(input.projectId);
+  const approvedById = new Map(approved.map((memory) => [memory.id, memory]));
+  const approvedByKey = new Map(approved.map((memory) => [dedupeKey(memory), memory]));
   const hits = input.store.searchApprovedMemories({
     projectId: input.projectId,
     query: input.query,
-    limit
+    limit: Math.max(limit, input.store.listRules(input.projectId).length)
   });
-  const selectedIds = new Set(hits.map((hit) => hit.memory.id));
-  const selected: MemoryRetrievalDecision[] = hits.map((hit) => ({
-    memoryId: hit.memory.id,
-    rank: hit.rank,
-    score: hit.score,
-    reason: retrievalReason(hit.memory, input.query),
-    category: hit.memory.category,
-    memoryType: hit.memory.memoryType,
-    scope: hit.memory.scope,
-    source: hit.memory.source
-  }));
+  const selectedMemories: MemoryRecord[] = [];
+  const selectedIds = new Set<string>();
+  const selected: MemoryRetrievalDecision[] = [];
+
+  for (const hit of hits) {
+    const memory = approvedById.get(hit.memory.id) ?? approvedByKey.get(dedupeKey(hit.memory));
+    if (!memory || selectedIds.has(memory.id) || selected.length >= limit) continue;
+
+    selectedIds.add(memory.id);
+    selectedMemories.push(memory);
+    selected.push({
+      memoryId: memory.id,
+      rank: selected.length + 1,
+      score: hit.score,
+      reason: retrievalReason(memory, input.query),
+      category: memory.category,
+      memoryType: memory.memoryType,
+      scope: memory.scope,
+      source: memory.source
+    });
+  }
+
   const skipped: SkippedMemory[] = approved
     .filter((memory) => !selectedIds.has(memory.id))
     .map((memory) => ({ memoryId: memory.id, reason: "not_relevant" }));
@@ -44,7 +57,7 @@ export function retrieveRelevantMemories(
     query: input.query,
     selected,
     skipped,
-    memories: hits.map((hit) => hit.memory),
+    memories: selectedMemories,
     metrics: {
       approvedMemories: approved.length,
       selectedMemories: selected.length,
@@ -77,4 +90,8 @@ function retrievalReason(memory: MemoryRecord, query: string): string {
 
 function tokenizeReasonText(text: string): Set<string> {
   return new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+}
+
+function dedupeKey(memory: MemoryRecord): string {
+  return `${memory.category}:${memory.rule}`;
 }

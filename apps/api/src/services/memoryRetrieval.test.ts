@@ -118,4 +118,55 @@ describe("memory retrieval", () => {
       reason: 'Matched package scope "api"'
     });
   });
+
+  it("dedupes equivalent approved memories before selecting injectable records", () => {
+    const store = createStore(":memory:");
+    const selected = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    const duplicate = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "Duplicate imported compatibility rule."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "theme",
+        rule: "Use approved color tokens for UI theme changes.",
+        reason: "Theme changes should follow design tokens."
+      }).id
+    );
+
+    const result = retrieveRelevantMemories({
+      store,
+      projectId: "demo",
+      query: "pnpm test package manager",
+      limit: 5
+    });
+
+    expect(result.selected.map((decision) => decision.memoryId)).toEqual([selected.id]);
+    expect(result.selected.map((decision) => decision.memoryId)).not.toContain(duplicate.id);
+    expect(result.memories.map((memory) => memory.id)).toEqual([selected.id]);
+    expect(result.metrics).toEqual({
+      approvedMemories: 2,
+      selectedMemories: 1,
+      skippedMemories: 1,
+      limit: 5
+    });
+    expect(result.skipped).toHaveLength(result.metrics.skippedMemories);
+    expect(result.selected).toHaveLength(result.metrics.selectedMemories);
+    expect(result.selected.length).toBeLessThanOrEqual(result.metrics.limit);
+    expect(result.metrics.selectedMemories + result.metrics.skippedMemories).toBe(
+      result.metrics.approvedMemories
+    );
+  });
 });
