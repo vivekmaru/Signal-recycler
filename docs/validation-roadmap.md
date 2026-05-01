@@ -320,6 +320,8 @@ Success criteria:
 
 The current app can create rules but cannot select among them well. Injection should become scoped and relevant.
 
+Implementation plan: `docs/superpowers/plans/2026-05-02-phase-3-memory-retrieval.md`
+
 Success criteria:
 
 - Top-k retrieval over approved memories beats "inject all rules" on task success and token cost.
