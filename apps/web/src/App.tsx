@@ -160,7 +160,7 @@ export function App() {
   }
 
   async function handleResetMemory() {
-    if (!window.confirm("Reset all rules, sessions, and events for this project?")) return;
+    if (!window.confirm("Reset all memories, sessions, and events for this project?")) return;
     await resetMemory();
     setDemoResult(null);
     setDemoStage("idle");
@@ -208,14 +208,14 @@ export function App() {
               <h1 className="text-3xl font-semibold tracking-normal">Signal Recycler</h1>
               <p className="max-w-2xl text-sm text-[#5f6868]">
                 Codex proxy that compresses noise and turns failures into approved memory — every
-                turn auto-extracts rule candidates, high-confidence ones auto-approve.
+                turn auto-extracts memory candidates, high-confidence ones auto-approve.
               </p>
             </div>
           </div>
           <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Metric label="Requests" value={metrics.requests} tone="emerald" />
             <Metric label="Compressed" value={metrics.compressions} tone="amber" />
-            <Metric label="Approved rules" value={metrics.approvedRules} tone="lime" />
+            <Metric label="Approved memory" value={metrics.approvedRules} tone="lime" />
             <Metric label="Tokens saved" value={metrics.tokensSaved} tone="lime" highlight />
           </section>
         </header>
@@ -227,7 +227,7 @@ export function App() {
               <p className="panel-copy">
                 Send a prompt from here, or pipe your terminal{" "}
                 <code className="rounded bg-[#ece5d8] px-1">codex</code> CLI through the proxy.
-                Either way, every turn auto-classifies and high-confidence rules auto-approve.
+                Either way, every turn auto-classifies and high-confidence memories auto-approve.
               </p>
             </div>
 
@@ -263,7 +263,7 @@ export function App() {
               </div>
               <p className="text-xs leading-5 text-[#263033]">
                 Resets memory, then runs two prompts back-to-back: one that triggers a known
-                failure, then the same task after the rule is auto-approved. Compares both runs.
+                failure, then the same task after the memory is auto-approved. Compares both runs.
               </p>
               <button
                 className="mt-3 w-full rounded bg-[#1d2528] px-3 py-2 text-sm font-semibold text-[#d9ff65] disabled:opacity-50"
@@ -336,17 +336,17 @@ export function App() {
           <aside className="panel flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="panel-title">Active playbook</h2>
+                <h2 className="panel-title">Active memory</h2>
                 <p className="panel-copy">
                   {metrics.approvedRules > 0
-                    ? `${metrics.approvedRules} rule${metrics.approvedRules === 1 ? "" : "s"} auto-injected into routed Codex requests.`
-                    : "Approved rules are injected into future requests routed through Signal Recycler."}
+                    ? `${metrics.approvedRules} approved memor${metrics.approvedRules === 1 ? "y" : "ies"} auto-injected into routed Codex requests.`
+                    : "Approved memory is injected into future requests routed through Signal Recycler."}
                 </p>
               </div>
               <button
                 className="icon-button"
-                aria-label="Add manual playbook rule"
-                title="Add rule"
+                aria-label="Add manual memory"
+                title="Add memory"
                 onClick={() => setManualRuleOpen((open) => !open)}
               >
                 <Sparkles size={16} />
@@ -362,21 +362,21 @@ export function App() {
             ) : (
               <button className="secondary-button justify-center" onClick={() => setManualRuleOpen(true)}>
                 <Sparkles size={15} />
-                Add rule
+                Add memory
               </button>
             )}
             <RuleGroup
-              title="Pending"
+              title="Candidate memory"
               rules={rules.filter((r) => r.status === "pending")}
               onAction={handleRuleAction}
             />
             <RuleGroup
-              title="Approved"
+              title="Approved memory"
               rules={rules.filter((r) => r.status === "approved")}
               onAction={handleRuleAction}
             />
             <RuleGroup
-              title="Rejected"
+              title="Rejected memory"
               rules={rules.filter((r) => r.status === "rejected")}
               onAction={handleRuleAction}
             />
@@ -405,7 +405,11 @@ function DemoImpactPanel({ result }: { result: DemoRunResult }) {
         <ImpactColumn
           tone="rose"
           label="Phase 1 — without memory"
-          subtitle={result.phase1.rulesCreated ? `${result.phase1.rulesCreated} rule(s) extracted` : "No rules in playbook"}
+          subtitle={
+            result.phase1.rulesCreated
+              ? `${result.phase1.rulesCreated} memory candidate(s) extracted`
+              : "No memory yet"
+          }
           response={result.phase1.finalResponse}
           stats={[
             { label: "Items", value: result.phase1.items.toString() },
@@ -415,7 +419,7 @@ function DemoImpactPanel({ result }: { result: DemoRunResult }) {
         <ImpactColumn
           tone="lime"
           label="Phase 2 — with memory"
-          subtitle="Approved rules auto-injected"
+          subtitle="Memory injected"
           response={result.phase2.finalResponse}
           stats={[
             { label: "Items", value: result.phase2.items.toString() },
@@ -538,7 +542,7 @@ function TimelineRow({ event }: { event: TimelineEvent }) {
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <span className={styling.chipClass}>
             {styling.icon}
-            {event.category.replace(/_/g, " ")}
+            {styling.label ?? event.category.replace(/_/g, " ")}
           </span>
           <time className="text-xs text-[#747b76]">
             {new Date(event.createdAt).toLocaleTimeString()}
@@ -601,7 +605,7 @@ function ProxyRequestRow({
             {injectedRules > 0 ? (
               <span className="inline-flex items-center gap-1 rounded bg-[#e9f9a8] px-2 py-1 text-xs font-medium text-[#5d7517]">
                 <Sparkles size={12} />
-                Injected {injectedRules} rule{injectedRules === 1 ? "" : "s"}
+                Memory injected: {injectedRules}
               </span>
             ) : null}
           </div>
@@ -642,6 +646,7 @@ function chipStyleForCategory(category: string): {
   chipClass: string;
   dotClass: string;
   icon: React.ReactNode;
+  label?: string;
 } {
   switch (category) {
     case "compression_result":
@@ -656,13 +661,15 @@ function chipStyleForCategory(category: string): {
         chipClass:
           "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#e9f9a8] text-[#5d7517] border border-[#cfe065]",
         dotClass: "bg-[#9db92d]",
-        icon: <Sparkles size={10} />
+        icon: <Sparkles size={10} />,
+        label: "Approved memory"
       };
     case "rule_candidate":
       return {
         chipClass: "event-chip bg-[#ffe0d9] text-[#8b2c13]",
         dotClass: "bg-[#dc2626]",
-        icon: null
+        icon: null,
+        label: "Candidate memory"
       };
     default:
       return { chipClass: "event-chip", dotClass: "", icon: null };
@@ -685,8 +692,8 @@ function ManualRuleForm({
   return (
     <form className="rounded border border-[#d7d0c2] bg-[#fffdf7] p-3" onSubmit={(event) => void onSubmit(event)}>
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase text-[#66706c]">Add approved rule</h3>
-        <button className="icon-button" type="button" aria-label="Cancel add rule" onClick={onCancel}>
+        <h3 className="text-xs font-semibold uppercase text-[#66706c]">Add approved memory</h3>
+        <button className="icon-button" type="button" aria-label="Cancel add memory" onClick={onCancel}>
           <X size={14} />
         </button>
       </div>
@@ -703,7 +710,7 @@ function ManualRuleForm({
         minLength={2}
       />
       <label className="mb-2 block text-xs font-semibold uppercase text-[#66706c]" htmlFor="manual-rule-rule">
-        Rule
+        Memory
       </label>
       <textarea
         id="manual-rule-rule"
@@ -732,7 +739,7 @@ function ManualRuleForm({
         </button>
         <button className="primary-button justify-center py-2" type="submit">
           <Sparkles size={15} />
-          Add rule
+          Add memory
         </button>
       </div>
     </form>
@@ -754,7 +761,7 @@ function RuleGroup({
       <div className="flex flex-col gap-2">
         {rules.length === 0 ? (
           <p className="rounded border border-dashed border-[#d7d0c2] p-3 text-sm text-[#747b76]">
-            No {title.toLowerCase()} rules.
+            No {title.toLowerCase()}.
           </p>
         ) : (
           rules.map((rule) => (
@@ -765,14 +772,14 @@ function RuleGroup({
                   <div className="flex gap-1">
                     <button
                       className="icon-button"
-                      aria-label="Approve rule"
+                      aria-label="Approve memory"
                       onClick={() => void onAction(rule.id, "approve")}
                     >
                       <Check size={15} />
                     </button>
                     <button
                       className="icon-button"
-                      aria-label="Reject rule"
+                      aria-label="Reject memory"
                       onClick={() => void onAction(rule.id, "reject")}
                     >
                       <X size={15} />

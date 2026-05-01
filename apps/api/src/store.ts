@@ -1,9 +1,21 @@
 import { DatabaseSync } from "node:sqlite";
 import {
   type EventCategory,
+  type MemoryConfidence,
+  type MemoryUsage,
+  type MemoryScope,
+  type MemorySource,
+  type MemorySyncStatus,
+  type MemoryType,
   type PlaybookRule,
   type SessionRecord,
-  type TimelineEvent
+  type TimelineEvent,
+  memoryConfidenceSchema,
+  memorySyncStatusSchema,
+  memoryScopeSchema,
+  memorySourceSchema,
+  memoryTypeSchema,
+  ruleStatusSchema
 } from "@signal-recycler/shared";
 
 type CreateRuleInput = {
@@ -12,6 +24,11 @@ type CreateRuleInput = {
   rule: string;
   reason: string;
   sourceEventId?: string | null;
+  memoryType?: MemoryType;
+  scope?: MemoryScope;
+  source?: MemorySource;
+  confidence?: MemoryConfidence;
+  syncStatus?: MemorySyncStatus;
 };
 
 type CreateSessionInput = {
@@ -25,6 +42,23 @@ type CreateEventInput = {
   title: string;
   body: string;
   metadata?: Record<string, unknown>;
+};
+
+type RecordMemoryUsageInput = {
+  projectId: string;
+  memoryId: string;
+  sessionId: string;
+  eventId: string;
+  adapter: string;
+  reason: string;
+};
+
+type RecordMemoryInjectionEventInput = {
+  sessionId: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+  usages: Array<Omit<RecordMemoryUsageInput, "eventId">>;
 };
 
 export type SignalRecyclerStore = ReturnType<typeof createStore>;
@@ -81,6 +115,8 @@ export function createStore(path: string) {
       ON rules (project_id, status, approved_at ASC);
   `);
 
+  migrateSchema(db);
+
   return {
     createSession(input: CreateSessionInput): SessionRecord {
       const session: SessionRecord = {
@@ -95,11 +131,14 @@ export function createStore(path: string) {
       return session;
     },
 
-    listSessions(): SessionRecord[] {
-      return db
-        .prepare("SELECT * FROM sessions ORDER BY created_at DESC")
-        .all()
-        .map(mapSession);
+    listSessions(projectId?: string): SessionRecord[] {
+      if (projectId !== undefined) {
+        return db
+          .prepare("SELECT * FROM sessions WHERE project_id = ? ORDER BY created_at DESC")
+          .all(projectId)
+          .map(mapSession);
+      }
+      return db.prepare("SELECT * FROM sessions ORDER BY created_at DESC").all().map(mapSession);
     },
 
     getSession(id: string): SessionRecord | null {
@@ -145,7 +184,23 @@ export function createStore(path: string) {
         .map(mapEvent);
     },
 
+    listAllEventsForProject(projectId: string, limit = 100): TimelineEvent[] {
+      return db
+        .prepare(
+          `SELECT events.*
+           FROM events
+           LEFT JOIN sessions ON sessions.id = events.session_id
+           WHERE sessions.project_id = ?
+              OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
+           ORDER BY events.created_at DESC
+           LIMIT ?`
+        )
+        .all(projectId, projectId, limit)
+        .map(mapEvent);
+    },
+
     createRuleCandidate(input: CreateRuleInput): PlaybookRule {
+      const timestamp = now();
       const rule: PlaybookRule = {
         id: createId("rule"),
         projectId: input.projectId,
@@ -154,11 +209,22 @@ export function createStore(path: string) {
         rule: input.rule,
         reason: input.reason,
         sourceEventId: input.sourceEventId ?? null,
-        createdAt: now(),
-        approvedAt: null
+        createdAt: timestamp,
+        approvedAt: null,
+        memoryType: input.memoryType ?? "rule",
+        scope: input.scope ?? { type: "project", value: null },
+        source: input.source ?? defaultMemorySource(input.sourceEventId ?? null),
+        confidence: input.confidence ?? "medium",
+        lastUsedAt: null,
+        supersededBy: null,
+        syncStatus: input.syncStatus ?? "local",
+        updatedAt: timestamp
       };
       db.prepare(
-        "INSERT INTO rules (id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        `INSERT INTO rules (
+          id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at,
+          memory_type, scope, source, confidence, last_used_at, superseded_by, sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         rule.id,
         rule.projectId,
@@ -168,26 +234,34 @@ export function createStore(path: string) {
         rule.reason,
         rule.sourceEventId,
         rule.createdAt,
-        rule.approvedAt
+        rule.approvedAt,
+        rule.memoryType,
+        JSON.stringify(rule.scope),
+        JSON.stringify(rule.source),
+        rule.confidence,
+        rule.lastUsedAt,
+        rule.supersededBy,
+        rule.syncStatus,
+        rule.updatedAt
       );
       return rule;
     },
 
     approveRule(id: string): PlaybookRule {
       const approvedAt = now();
-      db.prepare("UPDATE rules SET status = 'approved', approved_at = ? WHERE id = ?").run(
-        approvedAt,
-        id
-      );
+      db.prepare(
+        "UPDATE rules SET status = 'approved', approved_at = ?, updated_at = ? WHERE id = ?"
+      ).run(approvedAt, approvedAt, id);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
       return rule;
     },
 
     rejectRule(id: string): PlaybookRule {
-      db.prepare("UPDATE rules SET status = 'rejected', approved_at = NULL WHERE id = ?").run(
-        id
-      );
+      const updatedAt = now();
+      db.prepare(
+        "UPDATE rules SET status = 'rejected', approved_at = NULL, updated_at = ? WHERE id = ?"
+      ).run(updatedAt, id);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
       return rule;
@@ -209,14 +283,189 @@ export function createStore(path: string) {
       return dedupeRules(
         db
         .prepare(
-          "SELECT * FROM rules WHERE project_id = ? AND status = 'approved' ORDER BY approved_at ASC"
+          "SELECT * FROM rules WHERE project_id = ? AND status = 'approved' AND superseded_by IS NULL ORDER BY approved_at ASC"
         )
         .all(projectId)
           .map(mapRule)
       );
     },
 
-    clearProjectMemory(projectId: string): { rulesDeleted: number; eventsDeleted: number; sessionsDeleted: number } {
+    recordMemoryUsage(input: RecordMemoryUsageInput): MemoryUsage {
+      const memoryRow = db
+        .prepare("SELECT * FROM rules WHERE id = ? AND project_id = ?")
+        .get(input.memoryId, input.projectId);
+      if (!memoryRow) throw new Error(`Rule not found for project: ${input.memoryId}`);
+      const memory = mapRule(memoryRow);
+      if (memory.status !== "approved" || memory.supersededBy !== null) {
+        throw new Error(`Rule is not injectable: ${input.memoryId}`);
+      }
+
+      const injectedAt = now();
+      const usage: MemoryUsage = {
+        id: createId("usage"),
+        projectId: input.projectId,
+        memoryId: input.memoryId,
+        sessionId: input.sessionId,
+        eventId: input.eventId,
+        adapter: input.adapter,
+        reason: input.reason,
+        injectedAt
+      };
+
+      db.exec("BEGIN");
+      try {
+        db.prepare(
+          `INSERT INTO memory_usages (
+            id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          usage.id,
+          usage.projectId,
+          usage.memoryId,
+          usage.sessionId,
+          usage.eventId,
+          usage.adapter,
+          usage.reason,
+          usage.injectedAt
+        );
+        const result = db
+          .prepare(
+            `UPDATE rules
+             SET last_used_at = ?, updated_at = ?
+             WHERE id = ? AND project_id = ? AND status = 'approved' AND superseded_by IS NULL`
+          )
+          .run(usage.injectedAt, usage.injectedAt, usage.memoryId, usage.projectId);
+        if (result.changes !== 1) throw new Error(`Rule is not injectable: ${usage.memoryId}`);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+
+      return usage;
+    },
+
+    recordMemoryInjectionEvent(input: RecordMemoryInjectionEventInput): TimelineEvent {
+      if (input.usages.length === 0) throw new Error("Memory injection requires usages");
+      for (const usage of input.usages) {
+        const memoryRow = db
+          .prepare(
+            "SELECT * FROM rules WHERE id = ? AND project_id = ? AND status = 'approved' AND superseded_by IS NULL"
+          )
+          .get(usage.memoryId, usage.projectId);
+        if (!memoryRow) throw new Error(`Rule is not injectable: ${usage.memoryId}`);
+      }
+
+      const timestamp = now();
+      const event: TimelineEvent = {
+        id: createId("event"),
+        sessionId: input.sessionId,
+        category: "memory_injection",
+        title: input.title,
+        body: input.body,
+        metadata: input.metadata,
+        createdAt: timestamp
+      };
+
+      db.exec("BEGIN");
+      try {
+        db.prepare(
+          "INSERT INTO events (id, session_id, category, title, body, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          event.id,
+          event.sessionId,
+          event.category,
+          event.title,
+          event.body,
+          JSON.stringify(event.metadata),
+          event.createdAt
+        );
+
+        for (const usageInput of input.usages) {
+          const usageId = createId("usage");
+          db.prepare(
+            `INSERT INTO memory_usages (
+              id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          ).run(
+            usageId,
+            usageInput.projectId,
+            usageInput.memoryId,
+            usageInput.sessionId,
+            event.id,
+            usageInput.adapter,
+            usageInput.reason,
+            timestamp
+          );
+          const result = db
+            .prepare(
+              `UPDATE rules
+               SET last_used_at = ?, updated_at = ?
+               WHERE id = ? AND project_id = ? AND status = 'approved' AND superseded_by IS NULL`
+            )
+            .run(timestamp, timestamp, usageInput.memoryId, usageInput.projectId);
+          if (result.changes !== 1) throw new Error(`Rule is not injectable: ${usageInput.memoryId}`);
+        }
+
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+
+      return event;
+    },
+
+    listMemoryUsages(memoryId: string): MemoryUsage[] {
+      return db
+        .prepare(
+          "SELECT * FROM memory_usages WHERE memory_id = ? ORDER BY injected_at DESC, id DESC"
+        )
+        .all(memoryId)
+        .map(mapMemoryUsage);
+    },
+
+    listMemoryUsagesForProject(projectId: string, memoryId: string): MemoryUsage[] {
+      return db
+        .prepare(
+          "SELECT * FROM memory_usages WHERE project_id = ? AND memory_id = ? ORDER BY injected_at DESC, id DESC"
+        )
+        .all(projectId, memoryId)
+        .map(mapMemoryUsage);
+    },
+
+    supersedeRule(id: string, replacementId: string): PlaybookRule {
+      if (id === replacementId) throw new Error(`Rule cannot supersede itself: ${id}`);
+      const original = this.getRule(id);
+      if (!original) throw new Error(`Rule not found: ${id}`);
+      const replacement = this.getRule(replacementId);
+      if (!replacement) throw new Error(`Replacement rule not found: ${replacementId}`);
+      if (replacement.projectId !== original.projectId) {
+        throw new Error(`Replacement rule not found in project: ${replacementId}`);
+      }
+      if (replacement.status !== "approved") {
+        throw new Error(`Replacement rule is not approved: ${replacementId}`);
+      }
+
+      const updatedAt = now();
+      const result = db
+        .prepare(
+          "UPDATE rules SET superseded_by = ?, updated_at = ? WHERE id = ? AND project_id = ?"
+        )
+        .run(replacementId, updatedAt, id, original.projectId);
+      if (result.changes !== 1) throw new Error(`Rule not found: ${id}`);
+      const rule = this.getRule(id);
+      if (!rule) throw new Error(`Rule not found: ${id}`);
+      return rule;
+    },
+
+    clearProjectMemory(projectId: string): {
+      rulesDeleted: number;
+      eventsDeleted: number;
+      sessionsDeleted: number;
+      memoryUsagesDeleted: number;
+    } {
+      const usagesResult = db.prepare("DELETE FROM memory_usages WHERE project_id = ?").run(projectId);
       const rulesResult = db
         .prepare("DELETE FROM rules WHERE project_id = ?")
         .run(projectId);
@@ -241,7 +490,8 @@ export function createStore(path: string) {
       return {
         rulesDeleted: Number(rulesResult.changes),
         eventsDeleted,
-        sessionsDeleted: Number(sessionsResult.changes)
+        sessionsDeleted: Number(sessionsResult.changes),
+        memoryUsagesDeleted: Number(usagesResult.changes)
       };
     },
 
@@ -283,6 +533,113 @@ export function createStore(path: string) {
   };
 }
 
+function migrateSchema(db: DatabaseSync): void {
+  const versionRow = db
+    .prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+    .get() as { value?: string } | undefined;
+  const version = Number(versionRow?.value ?? 1);
+
+  if (version < 2 || hasMissingRuleMemoryColumns(db)) {
+    db.exec("BEGIN");
+    try {
+      addRuleColumnIfMissing(db, "memory_type", "TEXT NOT NULL DEFAULT 'rule'");
+      addRuleColumnIfMissing(
+        db,
+        "scope",
+        `TEXT NOT NULL DEFAULT '{"type":"project","value":null}'`
+      );
+      addRuleColumnIfMissing(
+        db,
+        "source",
+        `TEXT NOT NULL DEFAULT '{"kind":"manual","author":"local-user"}'`
+      );
+      addRuleColumnIfMissing(db, "confidence", "TEXT NOT NULL DEFAULT 'medium'");
+      addRuleColumnIfMissing(db, "last_used_at", "TEXT");
+      addRuleColumnIfMissing(db, "superseded_by", "TEXT");
+      addRuleColumnIfMissing(db, "sync_status", "TEXT NOT NULL DEFAULT 'local'");
+      addRuleColumnIfMissing(db, "updated_at", "TEXT");
+      db.prepare("UPDATE rules SET updated_at = created_at WHERE updated_at IS NULL").run();
+      backfillEventMemorySources(db);
+      db.prepare("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'").run();
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  backfillEventMemorySources(db);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_usages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      memory_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      adapter TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      injected_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_usages_memory_injected
+      ON memory_usages (memory_id, injected_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_memory_usages_project_injected
+      ON memory_usages (project_id, injected_at DESC);
+  `);
+}
+
+function hasMissingRuleMemoryColumns(db: DatabaseSync): boolean {
+  const columns = getRuleColumns(db);
+  return [
+    "memory_type",
+    "scope",
+    "source",
+    "confidence",
+    "last_used_at",
+    "superseded_by",
+    "sync_status",
+    "updated_at"
+  ].some((column) => !columns.has(column));
+}
+
+function addRuleColumnIfMissing(
+  db: DatabaseSync,
+  column: string,
+  definition: string
+): void {
+  const columns = getRuleColumns(db);
+  if (columns.has(column)) return;
+  db.exec(`ALTER TABLE rules ADD COLUMN ${column} ${definition}`);
+}
+
+function getRuleColumns(db: DatabaseSync): Set<string> {
+  return new Set(
+    db
+      .prepare("PRAGMA table_info(rules)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name))
+  );
+}
+
+function backfillEventMemorySources(db: DatabaseSync): void {
+  const columns = getRuleColumns(db);
+  if (!columns.has("source") || !columns.has("source_event_id")) return;
+  db.prepare(
+    `UPDATE rules
+     SET source = json_object(
+       'kind', 'event',
+       'sessionId', COALESCE(
+         (SELECT events.session_id FROM events WHERE events.id = rules.source_event_id),
+         'unknown'
+       ),
+       'eventId', source_event_id
+     )
+     WHERE source_event_id IS NOT NULL
+       AND source = '{"kind":"manual","author":"local-user"}'`
+  ).run();
+}
+
 function dedupeRules(rules: PlaybookRule[]): PlaybookRule[] {
   const seen = new Set<string>();
   return rules.filter((rule) => {
@@ -299,6 +656,22 @@ function createId(prefix: string): string {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function defaultMemorySource(sourceEventId: string | null): MemorySource {
+  if (sourceEventId) {
+    return { kind: "event", sessionId: "unknown", eventId: sourceEventId };
+  }
+  return { kind: "manual", author: "local-user" };
+}
+
+function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function mapSession(row: Record<string, unknown>): SessionRecord {
@@ -323,15 +696,49 @@ function mapEvent(row: Record<string, unknown>): TimelineEvent {
 }
 
 function mapRule(row: Record<string, unknown>): PlaybookRule {
+  const scope = memoryScopeSchema.parse(
+    parseJsonColumn(row.scope, { type: "project", value: null })
+  );
+  const source = memorySourceSchema.parse(
+    parseJsonColumn(row.source, { kind: "manual", author: "local-user" })
+  );
+
   return {
     id: String(row.id),
     projectId: String(row.project_id),
-    status: row.status as PlaybookRule["status"],
+    status: ruleStatusSchema.parse(row.status),
     category: String(row.category),
     rule: String(row.rule),
     reason: String(row.reason),
     sourceEventId: row.source_event_id === null ? null : String(row.source_event_id),
     createdAt: String(row.created_at),
-    approvedAt: row.approved_at === null ? null : String(row.approved_at)
+    approvedAt: row.approved_at === null ? null : String(row.approved_at),
+    memoryType: memoryTypeSchema.parse(row.memory_type ?? "rule"),
+    scope,
+    source,
+    confidence: memoryConfidenceSchema.parse(row.confidence ?? "medium"),
+    lastUsedAt:
+      row.last_used_at === null || row.last_used_at === undefined
+        ? null
+        : String(row.last_used_at),
+    supersededBy:
+      row.superseded_by === null || row.superseded_by === undefined
+        ? null
+        : String(row.superseded_by),
+    syncStatus: memorySyncStatusSchema.parse(row.sync_status ?? "local"),
+    updatedAt: String(row.updated_at ?? row.created_at)
+  };
+}
+
+function mapMemoryUsage(row: Record<string, unknown>): MemoryUsage {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    memoryId: String(row.memory_id),
+    sessionId: String(row.session_id),
+    eventId: String(row.event_id),
+    adapter: String(row.adapter),
+    reason: String(row.reason),
+    injectedAt: String(row.injected_at)
   };
 }

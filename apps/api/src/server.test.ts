@@ -1,6 +1,11 @@
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
+import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
 
 const TEST_APP_OPTIONS = {
@@ -76,17 +81,101 @@ describe("api", () => {
       title: "Tracked event",
       body: "Visible in dashboard firehose"
     });
+    const otherSession = store.createSession({
+      projectId: "other-project",
+      title: "Other Firehose"
+    });
+    store.createEvent({
+      sessionId: otherSession.id,
+      category: "codex_event",
+      title: "Other project event",
+      body: "Hidden from this dashboard"
+    });
+    store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Current proxy event",
+      body: "Visible proxy event",
+      metadata: { projectId: TEST_APP_OPTIONS.projectId }
+    });
+    store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Other proxy event",
+      body: "Hidden proxy event",
+      metadata: { projectId: "other-project" }
+    });
 
     const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=10" });
 
     expect(response.statusCode).toBe(200);
+    const titles = response.json().map((event: { title: string }) => event.title);
+    expect(titles).toEqual(expect.arrayContaining(["Tracked event", "Current proxy event"]));
+    expect(titles).not.toEqual(expect.arrayContaining(["Other project event", "Other proxy event"]));
+  });
+
+  it("lists only sessions for the current project", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const current = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Current project"
+    });
+    store.createSession({
+      projectId: "other-project",
+      title: "Other project"
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/sessions" });
+
+    expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual([
-      expect.objectContaining({
-        sessionId: session.id,
-        category: "codex_event",
-        title: "Tracked event"
-      })
+      expect.objectContaining({ id: current.id, title: "Current project" })
     ]);
+  });
+
+  it("does not expose another project's session events", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const otherSession = store.createSession({
+      projectId: "other-project",
+      title: "Other project"
+    });
+    store.createEvent({
+      sessionId: otherSession.id,
+      category: "memory_injection",
+      title: "Other project memory",
+      body: "Hidden",
+      metadata: { projectId: "other-project" }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${otherSession.id}/events`
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: "Session not found" });
+
+    const run = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${otherSession.id}/run`,
+      payload: { prompt: "Should not run" }
+    });
+    expect(run.statusCode).toBe(404);
+    expect(run.json()).toMatchObject({ error: "Session not found" });
   });
 
   it("creates rule candidates during a run and emits ordered events", async () => {
@@ -111,11 +200,214 @@ describe("api", () => {
       payload: { prompt: "Phase 1" }
     });
     const events = await app.inject({ method: "GET", url: `/api/sessions/${id}/events` });
+    const body = run.json();
 
     expect(run.statusCode).toBe(200);
+    expect(body.candidateRules).toEqual([
+      expect.objectContaining({
+        category: expect.any(String),
+        rule: expect.any(String),
+        reason: expect.any(String)
+      })
+    ]);
+    const candidate = body.candidateRules[0];
+    expect(candidate.source).toMatchObject({
+      kind: "event",
+      sessionId: id,
+      eventId: expect.stringMatching(/^event_/)
+    });
+    expect(candidate.confidence).toBe("high");
     expect(events.json().map((event: { category: string }) => event.category)).toEqual(
       expect.arrayContaining(["codex_event", "classifier_result", "rule_candidate"])
     );
+  });
+
+  it("creates manual memories with manual provenance", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memories",
+      payload: {
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The repository uses pnpm workspaces.",
+        memoryType: "command_convention",
+        scope: { type: "project", value: null }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "approved",
+      memoryType: "command_convention",
+      source: { kind: "manual", author: "local-user" },
+      syncStatus: "local"
+    });
+  });
+
+  it("creates synced memories with synced file provenance", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memories/synced",
+      payload: {
+        category: "project-context",
+        rule: "Follow the signal recycler section in AGENTS.md.",
+        reason: "Imported from repository agent instructions.",
+        path: "AGENTS.md",
+        section: "signal-recycler"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "approved",
+      memoryType: "synced_file",
+      source: { kind: "synced_file", path: "AGENTS.md", section: "signal-recycler" },
+      syncStatus: "imported"
+    });
+  });
+
+  it("returns memory audit trail with source and usages", async () => {
+    const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-api-")), "test.sqlite");
+    const store = createStore(databasePath);
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm.",
+        source: { kind: "manual", author: "local-user" },
+        confidence: "high"
+      }).id
+    );
+    const event = store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Injected memory",
+      body: "Injected 1 memory.",
+      metadata: { projectId: "demo", memoryIds: [memory.id] }
+    });
+    store.recordMemoryUsage({
+      projectId: "demo",
+      memoryId: memory.id,
+      sessionId: "proxy",
+      eventId: event.id,
+      adapter: "proxy",
+      reason: "approved_project_memory"
+    });
+    const db = new DatabaseSync(databasePath);
+    db.prepare(
+      `INSERT INTO memory_usages (
+        id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "usage_other_project",
+      "other",
+      memory.id,
+      "other-session",
+      "other-event",
+      "proxy",
+      "other_project_memory",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.close();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/memories/${memory.id}/audit`
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body).toMatchObject({
+      memory: { id: memory.id, source: { kind: "manual", author: "local-user" } },
+      usages: [
+        {
+          projectId: "demo",
+          memoryId: memory.id,
+          sessionId: "proxy",
+          eventId: event.id,
+          adapter: "proxy",
+          reason: "approved_project_memory"
+        }
+      ]
+    });
+    expect(body.usages).toHaveLength(1);
+  });
+
+  it("returns 404 for a memory audit trail outside the current project", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other",
+        category: "package-manager",
+        rule: "Use npm for this other workspace.",
+        reason: "The other workspace uses npm.",
+        source: { kind: "manual", author: "local-user" },
+        confidence: "high"
+      }).id
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/memories/${memory.id}/audit`
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: "Memory not found" });
+  });
+
+  it("returns 404 for a missing memory audit trail", async () => {
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/memories/does-not-exist/audit"
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: "Memory not found" });
   });
 
   it("creates a manually approved playbook rule", async () => {
@@ -144,6 +436,63 @@ describe("api", () => {
       rule: "For frontend tasks, never modify apps/api unless explicitly asked.",
       reason: "Manual guardrail before running a broad UI prompt."
     });
+  });
+
+  it("rejects non-rule memory types on the legacy rules endpoint", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/rules",
+      payload: {
+        category: "frontend",
+        rule: "Prefer compact controls for dense operational screens.",
+        reason: "Legacy rule endpoint only accepts rule memories.",
+        memoryType: "preference"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memoryType",
+      message: "/api/rules only accepts memoryType \"rule\""
+    });
+  });
+
+  it("does not approve or reject rules outside the current project", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const otherRule = store.createRuleCandidate({
+      projectId: "other-project",
+      category: "package-manager",
+      rule: "Use npm for this other project.",
+      reason: "Other project convention."
+    });
+
+    const approve = await app.inject({
+      method: "POST",
+      url: `/api/rules/${otherRule.id}/approve`
+    });
+    const reject = await app.inject({
+      method: "POST",
+      url: `/api/rules/${otherRule.id}/reject`
+    });
+
+    expect(approve.statusCode).toBe(404);
+    expect(reject.statusCode).toBe(404);
+    expect(store.getRule(otherRule.id)?.status).toBe("pending");
   });
 
   it("returns a clear gateway error when the Codex runner fails", async () => {
@@ -203,7 +552,7 @@ describe("api", () => {
     expect(response.json()).toEqual({ ok: true });
   });
 
-  it("records injection metadata on proxy requests", async () => {
+  it("records injection audit events and usage rows on proxy requests", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -239,9 +588,243 @@ describe("api", () => {
     expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
       injectedRules: 1
     });
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
+    expect(memoryEvent?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "proxy",
+      method: "POST",
+      path: "/v1/responses",
+      memoryIds: [manualRule.id]
+    });
+    expect(store.listMemoryUsages(manualRule.id)).toHaveLength(1);
+    expect(store.getRule(manualRule.id)?.lastUsedAt).not.toBeNull();
   });
 
-  it("does not emit standalone proxy injection events from the Codex runner", async () => {
+  it("does not record proxy memory usage for requests without an injected body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    );
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "tooling",
+        rule: "Use pnpm for package scripts.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/proxy/v1/models",
+      headers: {
+        "x-signal-recycler-session-id": "proxy-get"
+      }
+    });
+    const events = store.listEvents("proxy-get");
+
+    expect(response.statusCode).toBe(200);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not record proxy memory usage for invalid JSON string bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    );
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "tooling",
+        rule: "Use pnpm for package scripts.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "text/plain",
+        "x-signal-recycler-session-id": "proxy-invalid-json"
+      },
+      payload: "{ invalid json"
+    });
+    const events = store.listEvents("proxy-invalid-json");
+
+    expect(response.statusCode).toBe(200);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not record proxy memory usage for non-injectable request bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    );
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "tooling",
+        rule: "Use pnpm for package scripts.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-array"
+      },
+      payload: JSON.stringify(["hello"])
+    });
+    const events = store.listEvents("proxy-array");
+
+    expect(response.statusCode).toBe(200);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not record proxy memory usage when upstream forwarding fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("upstream unavailable");
+      })
+    );
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "tooling",
+        rule: "Use pnpm for package scripts.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-upstream-fail"
+      },
+      payload: JSON.stringify({ input: "hello" })
+    });
+    const events = store.listEvents("proxy-upstream-fail");
+
+    expect(response.statusCode).toBe(500);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not fail proxy responses when memory audit persistence fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    );
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "tooling",
+        rule: "Use pnpm for package scripts.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: {
+        ...store,
+        recordMemoryInjectionEvent: () => {
+          throw new Error("audit unavailable");
+        }
+      },
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-audit-fail"
+      },
+      payload: JSON.stringify({ input: "hello" })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(
+      store.listEvents("proxy-audit-fail").some((event) => event.category === "memory_injection")
+    ).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+  });
+
+  it("validates injectable memories before recording injection events", () => {
+    const store = createStore(":memory:");
+    const memory = store.createRuleCandidate({
+      projectId: TEST_APP_OPTIONS.projectId,
+      category: "tooling",
+      rule: "Use pnpm for package scripts.",
+      reason: "Pending rules are not injectable."
+    });
+
+    expect(() =>
+      recordMemoryInjection({
+        store,
+        projectId: TEST_APP_OPTIONS.projectId,
+        sessionId: "service-validation",
+        adapter: "proxy",
+        memories: [memory],
+        reason: "approved_project_memory"
+      })
+    ).toThrow("Rule is not injectable");
+    expect(store.listEvents("service-validation")).toHaveLength(0);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+  });
+
+  it("records injection audit events and usage rows from the mock Codex runner", async () => {
     vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
     const store = createStore(":memory:");
     const rule = store.createRuleCandidate({
@@ -260,8 +843,53 @@ describe("api", () => {
 
     await runner.run({ sessionId: "codex-runner", prompt: "Apply the theme." });
     const events = store.listEvents("codex-runner");
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
 
-    expect(events.map((event) => event.category)).toEqual(["proxy_request"]);
+    expect(events.map((event) => event.category)).toEqual(["proxy_request", "memory_injection"]);
     expect(events[0]?.metadata).toMatchObject({ approvedRulesAvailable: 1 });
+    expect(memoryEvent?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "mock-codex",
+      memoryIds: [rule.id]
+    });
+    expect(store.listMemoryUsages(rule.id)).toHaveLength(1);
+    expect(store.getRule(rule.id)?.lastUsedAt).not.toBeNull();
+  });
+
+  it("does not fail mock Codex runs when memory audit persistence fails", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const store = createStore(":memory:");
+      const rule = store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use the approved theme tokens.",
+        reason: "Manual demo rule."
+      });
+      store.approveRule(rule.id);
+      const runner = createCodexRunner({
+        store: {
+          ...store,
+          recordMemoryInjectionEvent: () => {
+            throw new Error("audit unavailable");
+          }
+        },
+        apiPort: 3001,
+        projectId: TEST_APP_OPTIONS.projectId,
+        workingDirectory: TEST_APP_OPTIONS.workingDirectory
+      });
+
+      const result = await runner.run({ sessionId: "codex-audit-fail", prompt: "Apply the theme." });
+
+      expect(result.finalResponse).toContain("Checking learned constraints from playbook");
+      expect(store.listMemoryUsages(rule.id)).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(
+        "[signal-recycler] Mock Codex memory audit failed",
+        expect.any(Error)
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

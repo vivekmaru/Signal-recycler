@@ -27,18 +27,20 @@ export async function registerSessionRoutes(
     });
   });
 
-  app.get("/api/sessions", async () => options.store.listSessions());
+  app.get("/api/sessions", async () => options.store.listSessions(projectId));
 
   app.get("/api/firehose/events", async (request) => {
     const { limit: rawLimit } = request.query as { limit?: string };
     const limit = Number(rawLimit ?? 100);
-    return options.store.listAllEvents(Number.isFinite(limit) ? limit : 100);
+    return options.store.listAllEventsForProject(projectId, Number.isFinite(limit) ? limit : 100);
   });
 
   app.post("/api/sessions/:id/run", async (request, reply) => {
     const { id } = request.params as { id: string };
     const session = options.store.getSession(id);
-    if (!session) return reply.code(404).send({ error: "Session not found" });
+    if (!session || session.projectId !== projectId) {
+      return reply.code(404).send({ error: "Session not found" });
+    }
 
     const parsed = runRequestSchema.parse(request.body);
     options.store.createEvent({
@@ -73,6 +75,10 @@ export async function registerSessionRoutes(
 
   app.get("/api/sessions/:id/events", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const session = options.store.getSession(id);
+    if (!session || session.projectId !== projectId) {
+      return reply.code(404).send({ error: "Session not found" });
+    }
     const events = options.store.listEvents(id);
     if (request.headers.accept?.includes("text/event-stream")) {
       reply.raw.writeHead(200, {
