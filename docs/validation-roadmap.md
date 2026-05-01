@@ -290,10 +290,14 @@ Success criteria:
 
 Make evals the product spine before broadening the architecture.
 
+Implementation plan: `docs/superpowers/plans/2026-05-01-phase-1-isolated-product-evals.md`.
+
+Current status: implemented locally with deterministic eval reports under `.signal-recycler/evals/`.
+
 Success criteria:
 
 - `pnpm eval` runs local deterministic evals without OpenAI calls.
-- `pnpm eval:live` runs optional model-backed scenarios.
+- `pnpm eval:live` runs optional adapter-backed scenarios through `SIGNAL_RECYCLER_LIVE_AGENT=codex|claude`.
 - Reports include success delta, token delta, latency, rule precision, and stale-memory failures.
 - At least one fixture proves correctness improvement from injected memory, not just cost reduction.
 

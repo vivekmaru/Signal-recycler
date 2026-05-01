@@ -63,3 +63,6 @@ playwright/.cache
 
 # Personal files
 .stash/
+
+# Signal Recycler local eval reports
+.signal-recycler/

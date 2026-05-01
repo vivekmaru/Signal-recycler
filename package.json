@@ -9,6 +9,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "type-check": "pnpm -r type-check",
+    "eval": "pnpm --filter @signal-recycler/api eval",
+    "eval:live": "pnpm --filter @signal-recycler/api eval:live",
     "smoke:demo": "node scripts/smoke-demo.mjs",
     "codex:install": "node scripts/codex-config.mjs install",
     "codex:uninstall": "node scripts/codex-config.mjs uninstall"
