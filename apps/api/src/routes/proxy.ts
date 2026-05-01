@@ -113,18 +113,30 @@ export async function registerProxyRoutes(
 
     const upstream = await fetch(upstreamUrl, fetchInit);
     if (injection.injected) {
-      recordMemoryInjection({
-        store: options.store,
-        projectId: options.projectId,
-        sessionId,
-        adapter: "proxy",
-        memories: rules,
-        reason: "approved_project_memory",
-        metadata: {
-          method: request.method,
-          path: tail
-        }
-      });
+      try {
+        recordMemoryInjection({
+          store: options.store,
+          projectId: options.projectId,
+          sessionId,
+          adapter: "proxy",
+          memories: rules,
+          reason: "approved_project_memory",
+          metadata: {
+            method: request.method,
+            path: tail
+          }
+        });
+      } catch (error) {
+        request.log.warn(
+          {
+            err: error,
+            projectId: options.projectId,
+            sessionId,
+            path: tail
+          },
+          "Memory injection audit failed after upstream proxy response"
+        );
+      }
     }
 
     reply.code(upstream.status);

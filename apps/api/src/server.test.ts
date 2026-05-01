@@ -756,6 +756,51 @@ describe("api", () => {
     expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
   });
 
+  it("does not fail proxy responses when memory audit persistence fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    );
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "tooling",
+        rule: "Use pnpm for package scripts.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: {
+        ...store,
+        recordMemoryInjectionEvent: () => {
+          throw new Error("audit unavailable");
+        }
+      },
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-audit-fail"
+      },
+      payload: JSON.stringify({ input: "hello" })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(
+      store.listEvents("proxy-audit-fail").some((event) => event.category === "memory_injection")
+    ).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+  });
+
   it("validates injectable memories before recording injection events", () => {
     const store = createStore(":memory:");
     const memory = store.createRuleCandidate({
