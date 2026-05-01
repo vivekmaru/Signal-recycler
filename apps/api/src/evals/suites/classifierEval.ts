@@ -109,20 +109,30 @@ export function scoreRuleExtraction(input: {
   emittedRules: string[];
 }): RuleExtractionScore {
   const emittedRule = input.emittedRules.length > 0;
-  const hasExpectedRule =
-    input.expectedRuleNeedles.length === 0 ||
-    input.emittedRules.some((rule) =>
-      input.expectedRuleNeedles.every((needle) => rule.includes(needle.toLowerCase()))
-    );
-  const matchedExpectedRule = input.expectRule && emittedRule && hasExpectedRule;
-  const unexpectedRuleEmission = emittedRule && (!input.expectRule || !hasExpectedRule);
-  const missingExpectedRule = input.expectRule && !hasExpectedRule;
+  const matchedExpectedRule = input.expectRule && emittedRuleMatchesNeedles(input);
+  const unexpectedRuleEmission =
+    emittedRule && (!input.expectRule || !emittedRuleMatchesNeedles(input));
+  const missingExpectedRule = input.expectRule && !matchedExpectedRule;
 
   return {
     truePositive: matchedExpectedRule ? 1 : 0,
     falsePositive: unexpectedRuleEmission ? 1 : 0,
     falseNegative: missingExpectedRule ? 1 : 0,
     status:
-      input.expectRule === emittedRule && (!input.expectRule || hasExpectedRule) ? "pass" : "fail"
+      (input.expectRule && matchedExpectedRule) || (!input.expectRule && !emittedRule)
+        ? "pass"
+        : "fail"
   };
+}
+
+function emittedRuleMatchesNeedles(input: {
+  expectedRuleNeedles: string[];
+  emittedRules: string[];
+}): boolean {
+  if (input.expectedRuleNeedles.length === 0) return input.emittedRules.length > 0;
+  return (
+    input.emittedRules.some((rule) =>
+      input.expectedRuleNeedles.every((needle) => rule.includes(needle.toLowerCase()))
+    )
+  );
 }

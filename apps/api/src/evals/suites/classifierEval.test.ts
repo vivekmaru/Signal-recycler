@@ -16,4 +16,19 @@ describe("classifier eval scoring", () => {
       status: "fail"
     });
   });
+
+  it("counts a presence-only expected rule with no emissions as a false negative", () => {
+    expect(
+      scoreRuleExtraction({
+        expectRule: true,
+        expectedRuleNeedles: [],
+        emittedRules: []
+      })
+    ).toEqual({
+      truePositive: 0,
+      falsePositive: 0,
+      falseNegative: 1,
+      status: "fail"
+    });
+  });
 });

@@ -132,15 +132,16 @@ function resolveAgentAdapter(agent: string): AgentAdapter | null {
   return null;
 }
 
-function extractCodexJsonlFinalText(stdout: string): string {
+export function extractCodexJsonlFinalText(stdout: string): string {
   const texts: string[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
     try {
       const event = JSON.parse(line) as Record<string, unknown>;
       const type = String(event.type ?? event.event ?? event.kind ?? "");
-      if (/user|prompt|input/i.test(type)) continue;
-      if (/assistant|message|final|response|completed/i.test(type)) {
+      const role = extractRole(event);
+      if (/user/i.test(type) || role === "user" || /prompt|input/i.test(type)) continue;
+      if (role === "assistant" || /final|response|completed/i.test(type)) {
         const text = extractLikelyText(event);
         if (text) texts.push(text);
       }
@@ -149,6 +150,17 @@ function extractCodexJsonlFinalText(stdout: string): string {
     }
   }
   return texts.join("\n");
+}
+
+function extractRole(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  if (typeof record["role"] === "string") return record["role"].toLowerCase();
+  for (const key of ["message", "item", "payload", "data"]) {
+    const role = extractRole(record[key]);
+    if (role) return role;
+  }
+  return "";
 }
 
 function extractLikelyText(value: unknown): string {
