@@ -132,6 +132,49 @@ describe("store", () => {
     expect(store.listMemoryUsages(memory.id)).toEqual([usage]);
   });
 
+  it("does not record memory usage for nonexistent memory", () => {
+    const store = createStore(":memory:");
+
+    expect(() =>
+      store.recordMemoryUsage({
+        projectId: "demo",
+        memoryId: "rule_missing",
+        sessionId: "session_1",
+        eventId: "event_1",
+        adapter: "proxy",
+        reason: "approved_project_memory"
+      })
+    ).toThrow("Rule not found for project: rule_missing");
+
+    expect(store.listMemoryUsages("rule_missing")).toEqual([]);
+  });
+
+  it("does not record cross-project memory usage or update last used timestamp", () => {
+    const store = createStore(":memory:");
+    const otherProjectMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+
+    expect(() =>
+      store.recordMemoryUsage({
+        projectId: "demo",
+        memoryId: otherProjectMemory.id,
+        sessionId: "session_1",
+        eventId: "event_1",
+        adapter: "proxy",
+        reason: "approved_project_memory"
+      })
+    ).toThrow(`Rule not found for project: ${otherProjectMemory.id}`);
+
+    expect(store.listMemoryUsages(otherProjectMemory.id)).toEqual([]);
+    expect(store.getRule(otherProjectMemory.id)?.lastUsedAt).toBeNull();
+  });
+
   it("supersedes approved memory so old memory is no longer injectable", () => {
     const store = createStore(":memory:");
     const oldMemory = store.approveRule(
@@ -155,6 +198,98 @@ describe("store", () => {
 
     expect(superseded.supersededBy).toBe(newMemory.id);
     expect(store.listApprovedRules("demo").map((r) => r.id)).toEqual([newMemory.id]);
+  });
+
+  it("does not supersede memory with nonexistent replacement", () => {
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+
+    expect(() => store.supersedeRule(oldMemory.id, "rule_missing")).toThrow(
+      "Replacement rule not found: rule_missing"
+    );
+    expect(store.getRule(oldMemory.id)?.supersededBy).toBeNull();
+  });
+
+  it("does not supersede memory with cross-project replacement", () => {
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const otherProjectMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Corrected instruction."
+      }).id
+    );
+
+    expect(() => store.supersedeRule(oldMemory.id, otherProjectMemory.id)).toThrow(
+      `Replacement rule not found in project: ${otherProjectMemory.id}`
+    );
+    expect(store.getRule(oldMemory.id)?.supersededBy).toBeNull();
+  });
+
+  it("does not supersede memory with non-approved replacement", () => {
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const pendingMemory = store.createRuleCandidate({
+      projectId: "demo",
+      category: "package-manager",
+      rule: "Use pnpm for package management.",
+      reason: "Corrected instruction."
+    });
+
+    expect(() => store.supersedeRule(oldMemory.id, pendingMemory.id)).toThrow(
+      `Replacement rule is not approved: ${pendingMemory.id}`
+    );
+    expect(store.getRule(oldMemory.id)?.supersededBy).toBeNull();
+  });
+
+  it("updates rule updatedAt when superseding memory", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const newMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Corrected instruction."
+      }).id
+    );
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:01.000Z"));
+    const superseded = store.supersedeRule(oldMemory.id, newMemory.id);
+
+    expect(superseded.updatedAt).toBe("2026-01-01T00:00:01.000Z");
   });
 
   it("migrates existing v1 rule rows with memory defaults", () => {

@@ -265,6 +265,11 @@ export function createStore(path: string) {
     },
 
     recordMemoryUsage(input: RecordMemoryUsageInput): MemoryUsage {
+      const memoryRow = db
+        .prepare("SELECT * FROM rules WHERE id = ? AND project_id = ?")
+        .get(input.memoryId, input.projectId);
+      if (!memoryRow) throw new Error(`Rule not found for project: ${input.memoryId}`);
+
       const injectedAt = now();
       const usage: MemoryUsage = {
         id: createId("usage"),
@@ -276,42 +281,66 @@ export function createStore(path: string) {
         reason: input.reason,
         injectedAt
       };
-      db.prepare(
-        `INSERT INTO memory_usages (
-          id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        usage.id,
-        usage.projectId,
-        usage.memoryId,
-        usage.sessionId,
-        usage.eventId,
-        usage.adapter,
-        usage.reason,
-        usage.injectedAt
-      );
-      db.prepare("UPDATE rules SET last_used_at = ?, updated_at = ? WHERE id = ?").run(
-        usage.injectedAt,
-        usage.injectedAt,
-        usage.memoryId
-      );
+
+      db.exec("BEGIN");
+      try {
+        db.prepare(
+          `INSERT INTO memory_usages (
+            id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          usage.id,
+          usage.projectId,
+          usage.memoryId,
+          usage.sessionId,
+          usage.eventId,
+          usage.adapter,
+          usage.reason,
+          usage.injectedAt
+        );
+        const result = db
+          .prepare(
+            "UPDATE rules SET last_used_at = ?, updated_at = ? WHERE id = ? AND project_id = ?"
+          )
+          .run(usage.injectedAt, usage.injectedAt, usage.memoryId, usage.projectId);
+        if (result.changes !== 1) throw new Error(`Rule not found for project: ${usage.memoryId}`);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+
       return usage;
     },
 
     listMemoryUsages(memoryId: string): MemoryUsage[] {
       return db
-        .prepare("SELECT * FROM memory_usages WHERE memory_id = ? ORDER BY injected_at DESC")
+        .prepare(
+          "SELECT * FROM memory_usages WHERE memory_id = ? ORDER BY injected_at DESC, id DESC"
+        )
         .all(memoryId)
         .map(mapMemoryUsage);
     },
 
     supersedeRule(id: string, replacementId: string): PlaybookRule {
+      const original = this.getRule(id);
+      if (!original) throw new Error(`Rule not found: ${id}`);
+      const replacement = this.getRule(replacementId);
+      if (!replacement) throw new Error(`Replacement rule not found: ${replacementId}`);
+      if (replacement.projectId !== original.projectId) {
+        throw new Error(`Replacement rule not found in project: ${replacementId}`);
+      }
+      if (replacement.status !== "approved") {
+        throw new Error(`Replacement rule is not approved: ${replacementId}`);
+      }
+
       const updatedAt = now();
-      db.prepare("UPDATE rules SET superseded_by = ?, updated_at = ? WHERE id = ?").run(
-        replacementId,
-        updatedAt,
-        id
-      );
+      const result = db
+        .prepare(
+          "UPDATE rules SET superseded_by = ?, updated_at = ? WHERE id = ? AND project_id = ?"
+        )
+        .run(replacementId, updatedAt, id, original.projectId);
+      if (result.changes !== 1) throw new Error(`Rule not found: ${id}`);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
       return rule;
