@@ -31,4 +31,22 @@ describe("classifier eval scoring", () => {
       status: "fail"
     });
   });
+
+  it("penalizes extra emitted rules when the expected rule is present", () => {
+    expect(
+      scoreRuleExtraction({
+        expectRule: true,
+        expectedRuleNeedles: ["pnpm", "npm"],
+        emittedRules: [
+          "use pnpm instead of npm for package scripts",
+          "prettier is not available in this environment"
+        ]
+      })
+    ).toEqual({
+      truePositive: 1,
+      falsePositive: 1,
+      falseNegative: 0,
+      status: "fail"
+    });
+  });
 });

@@ -109,30 +109,31 @@ export function scoreRuleExtraction(input: {
   emittedRules: string[];
 }): RuleExtractionScore {
   const emittedRule = input.emittedRules.length > 0;
-  const matchedExpectedRule = input.expectRule && emittedRuleMatchesNeedles(input);
-  const unexpectedRuleEmission =
-    emittedRule && (!input.expectRule || !emittedRuleMatchesNeedles(input));
+  const matchingRuleCount = countMatchingRules(input);
+  const matchedExpectedRule = input.expectRule && matchingRuleCount > 0;
+  const falsePositiveCount = input.expectRule
+    ? input.emittedRules.length - matchingRuleCount
+    : input.emittedRules.length;
   const missingExpectedRule = input.expectRule && !matchedExpectedRule;
 
   return {
     truePositive: matchedExpectedRule ? 1 : 0,
-    falsePositive: unexpectedRuleEmission ? 1 : 0,
+    falsePositive: falsePositiveCount,
     falseNegative: missingExpectedRule ? 1 : 0,
     status:
-      (input.expectRule && matchedExpectedRule) || (!input.expectRule && !emittedRule)
+      (input.expectRule && matchedExpectedRule && falsePositiveCount === 0) ||
+      (!input.expectRule && !emittedRule)
         ? "pass"
         : "fail"
   };
 }
 
-function emittedRuleMatchesNeedles(input: {
+function countMatchingRules(input: {
   expectedRuleNeedles: string[];
   emittedRules: string[];
-}): boolean {
-  if (input.expectedRuleNeedles.length === 0) return input.emittedRules.length > 0;
-  return (
-    input.emittedRules.some((rule) =>
-      input.expectedRuleNeedles.every((needle) => rule.includes(needle.toLowerCase()))
-    )
-  );
+}): number {
+  if (input.expectedRuleNeedles.length === 0) return input.emittedRules.length > 0 ? 1 : 0;
+  return input.emittedRules.filter((rule) =>
+    input.expectedRuleNeedles.every((needle) => rule.includes(needle.toLowerCase()))
+  ).length;
 }
