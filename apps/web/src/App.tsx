@@ -339,8 +339,8 @@ export function App() {
                 <h2 className="panel-title">Active playbook</h2>
                 <p className="panel-copy">
                   {metrics.approvedRules > 0
-                    ? `${metrics.approvedRules} rule${metrics.approvedRules === 1 ? "" : "s"} auto-injected into every Codex turn.`
-                    : "Approved rules are injected into every future Codex turn."}
+                    ? `${metrics.approvedRules} rule${metrics.approvedRules === 1 ? "" : "s"} auto-injected into routed Codex requests.`
+                    : "Approved rules are injected into future requests routed through Signal Recycler."}
                 </p>
               </div>
               <button
