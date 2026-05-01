@@ -1122,6 +1122,8 @@ git commit -m "feat: add optional agent cli eval suite"
 Create `apps/api/src/evals/run.ts`:
 
 ```ts
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildReport, writeReportFiles } from "./report.js";
 import { runClassifierEval } from "./suites/classifierEval.js";
 import { runCompressorEval } from "./suites/compressorEval.js";
@@ -1132,6 +1134,7 @@ import { runScenarioEval } from "./suites/scenarioEval.js";
 import { type EvalSuiteResult } from "./types.js";
 
 const live = process.argv.includes("--live");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 const suites: EvalSuiteResult[] = [];
 suites.push(await timed("compressor", runCompressorEval));
@@ -1145,7 +1148,7 @@ const report = buildReport({
   mode: live ? "live" : "local",
   suites
 });
-const files = await writeReportFiles(report);
+const files = await writeReportFiles(report, path.join(repoRoot, ".signal-recycler/evals"));
 
 console.log(`Signal Recycler eval status: ${report.status}`);
 console.log(`JSON report: ${files.jsonPath}`);
