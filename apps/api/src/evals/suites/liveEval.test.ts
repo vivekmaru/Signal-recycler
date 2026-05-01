@@ -28,4 +28,28 @@ describe("live eval Codex JSONL parsing", () => {
 
     expect(extractCodexJsonlFinalText(stdout)).toContain("SIGNAL_RECYCLER_LIVE_EVAL_PASS");
   });
+
+  it("keeps Codex item.completed agent_message text for sentinel matching", () => {
+    const stdout = JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "agent_message",
+        text: "SIGNAL_RECYCLER_LIVE_EVAL_PASS"
+      }
+    });
+
+    expect(extractCodexJsonlFinalText(stdout)).toContain("SIGNAL_RECYCLER_LIVE_EVAL_PASS");
+  });
+
+  it("ignores Codex item.completed user_message text that contains the sentinel", () => {
+    const stdout = JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "user_message",
+        content: "Please reply with SIGNAL_RECYCLER_LIVE_EVAL_PASS."
+      }
+    });
+
+    expect(extractCodexJsonlFinalText(stdout)).not.toContain("SIGNAL_RECYCLER_LIVE_EVAL_PASS");
+  });
 });

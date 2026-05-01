@@ -156,6 +156,9 @@ function extractRole(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
   if (typeof record["role"] === "string") return record["role"].toLowerCase();
+  const type = String(record["type"] ?? record["event"] ?? record["kind"] ?? "").toLowerCase();
+  if (/user[_-]?message|input[_-]?message/.test(type)) return "user";
+  if (/agent[_-]?message|assistant[_-]?message/.test(type)) return "assistant";
   for (const key of ["message", "item", "payload", "data"]) {
     const role = extractRole(record[key]);
     if (role) return role;
@@ -172,5 +175,8 @@ function extractLikelyText(value: unknown): string {
   const direct = ["text", "content", "message", "finalResponse", "output_text"]
     .map((key) => extractLikelyText(record[key]))
     .filter(Boolean);
-  return direct.join("\n");
+  const nested = ["item", "payload", "data"]
+    .map((key) => extractLikelyText(record[key]))
+    .filter(Boolean);
+  return [...direct, ...nested].join("\n");
 }
