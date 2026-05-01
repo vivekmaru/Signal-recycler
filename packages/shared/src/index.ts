@@ -6,13 +6,10 @@ export type RuleStatus = z.infer<typeof ruleStatusSchema>;
 export const eventCategorySchema = z.enum([
   "codex_event",
   "proxy_request",
-  "proxy_injection",
   "compression_result",
   "classifier_result",
   "rule_candidate",
-  "rule_auto_approved",
-  "rule_approved",
-  "rule_rejected"
+  "rule_auto_approved"
 ]);
 export type EventCategory = z.infer<typeof eventCategorySchema>;
 

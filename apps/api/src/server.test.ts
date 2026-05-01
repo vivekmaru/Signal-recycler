@@ -150,7 +150,7 @@ describe("api", () => {
     expect(response.json()).toEqual({ ok: true });
   });
 
-  it("records injection metadata on proxy requests without a standalone proxy injection event", async () => {
+  it("records injection metadata on proxy requests", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -183,7 +183,6 @@ describe("api", () => {
     const events = store.listEvents("proxy");
 
     expect(response.statusCode).toBe(200);
-    expect(events.map((event) => event.category)).not.toContain("proxy_injection");
     expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
       injectedRules: 1
     });

@@ -57,7 +57,7 @@ console.log(
       approvedRule: firstRule.rule,
       phase2Response: secondRun.finalResponse,
       eventCategories: events.map((event) => event.category),
-      hasProxyInjection: events.some((event) => event.category === "proxy_injection"),
+      proxyRequests: events.filter((event) => event.category === "proxy_request").length,
       playbook
     },
     null,
