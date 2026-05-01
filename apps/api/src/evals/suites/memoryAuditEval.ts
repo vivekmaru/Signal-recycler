@@ -39,12 +39,42 @@ export async function runMemoryAuditEval(): Promise<EvalSuiteResult> {
   });
 
   const memories = store.listApprovedRules("demo");
-  const usageCount = memories.reduce(
-    (count, memory) => count + store.listMemoryUsages(memory.id).length,
-    0
-  );
-  const provenanceComplete = memories.every(
-    (memory) => memory.source.kind === "manual" || memory.source.kind === "synced_file"
+  const approvedManual = memories.find((memory) => memory.id === manual.id);
+  const approvedSynced = memories.find((memory) => memory.id === synced.id);
+  const provenanceComplete =
+    memories.length === 2 &&
+    approvedManual?.source.kind === "manual" &&
+    approvedManual.source.author === "local-user" &&
+    approvedSynced?.source.kind === "synced_file" &&
+    approvedSynced.source.path === "AGENTS.md" &&
+    approvedSynced.source.section === "signal-recycler" &&
+    approvedSynced.memoryType === "synced_file" &&
+    approvedSynced.syncStatus === "imported";
+
+  const memoryInjectionEvents = store
+    .listEvents(session.id)
+    .filter((event) => event.category === "memory_injection");
+  const memoryInjectionEvent =
+    memoryInjectionEvents.length === 1 ? memoryInjectionEvents[0] : undefined;
+  const usageRows = [manual, synced].flatMap((memory) => store.listMemoryUsages(memory.id));
+  const usageAuditComplete =
+    memoryInjectionEvent !== undefined &&
+    [manual, synced].every((memory) => {
+      const usages = store.listMemoryUsages(memory.id);
+      if (usages.length !== 1) return false;
+      const usage = usages[0];
+      if (!usage) return false;
+      return (
+        usage.sessionId === session.id &&
+        usage.adapter === "eval" &&
+        usage.reason === "approved_project_memory" &&
+        usage.eventId === memoryInjectionEvent.id
+      );
+    });
+  const usageCount = usageRows.length;
+  const usageEventCount = new Set(usageRows.map((usage) => usage.eventId)).size;
+  const usageRowsTiedToInjection = usageRows.every(
+    (usage) => usage.eventId === memoryInjectionEvent?.id
   );
 
   return suiteResult({
@@ -56,19 +86,23 @@ export async function runMemoryAuditEval(): Promise<EvalSuiteResult> {
         title: "Approved memories retain distinct provenance",
         status: provenanceComplete ? "pass" : "fail",
         summary: provenanceComplete
-          ? "Manual and synced memories keep distinct source metadata."
-          : "At least one memory lost source metadata."
+          ? "Two approved memories keep exact manual and synced source metadata."
+          : `Expected exact manual and synced provenance across 2 approved memories; found ${memories.length}.`
       },
       {
         id: "memory-audit.usage",
         title: "Injected memories produce usage rows",
-        status: usageCount === 2 ? "pass" : "fail",
-        summary: `Recorded ${usageCount} usage rows for 2 injected memories.`
+        status: usageAuditComplete ? "pass" : "fail",
+        summary: usageAuditComplete
+          ? "Each injected memory has one usage row tied to the memory injection event."
+          : `Recorded ${usageCount} usage rows across ${usageEventCount} event id(s); tiedToInjection=${usageRowsTiedToInjection}.`
       }
     ],
     metrics: [
       metric("memory_provenance_coverage", provenanceComplete ? 1 : 0, "ratio"),
-      metric("memory_usage_rows", usageCount, "rows")
+      metric("approved_memory_count", memories.length, "memories"),
+      metric("memory_usage_rows", usageCount, "rows"),
+      metric("memory_usage_audit_coverage", usageAuditComplete ? 1 : 0, "ratio")
     ]
   });
 }
