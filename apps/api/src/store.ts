@@ -9,8 +9,12 @@ import {
   type PlaybookRule,
   type SessionRecord,
   type TimelineEvent,
+  memoryConfidenceSchema,
+  memorySyncStatusSchema,
   memoryScopeSchema,
-  memorySourceSchema
+  memorySourceSchema,
+  memoryTypeSchema,
+  ruleStatusSchema
 } from "@signal-recycler/shared";
 
 type CreateRuleInput = {
@@ -209,19 +213,19 @@ export function createStore(path: string) {
 
     approveRule(id: string): PlaybookRule {
       const approvedAt = now();
-      db.prepare("UPDATE rules SET status = 'approved', approved_at = ? WHERE id = ?").run(
-        approvedAt,
-        id
-      );
+      db.prepare(
+        "UPDATE rules SET status = 'approved', approved_at = ?, updated_at = ? WHERE id = ?"
+      ).run(approvedAt, approvedAt, id);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
       return rule;
     },
 
     rejectRule(id: string): PlaybookRule {
-      db.prepare("UPDATE rules SET status = 'rejected', approved_at = NULL WHERE id = ?").run(
-        id
-      );
+      const updatedAt = now();
+      db.prepare(
+        "UPDATE rules SET status = 'rejected', approved_at = NULL, updated_at = ? WHERE id = ?"
+      ).run(updatedAt, id);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
       return rule;
@@ -323,19 +327,32 @@ function migrateSchema(db: DatabaseSync): void {
     .get() as { value?: string } | undefined;
   const version = Number(versionRow?.value ?? 1);
 
-  if (version < 2) {
-    db.exec(`
-      ALTER TABLE rules ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'rule';
-      ALTER TABLE rules ADD COLUMN scope TEXT NOT NULL DEFAULT '{"type":"project","value":null}';
-      ALTER TABLE rules ADD COLUMN source TEXT NOT NULL DEFAULT '{"kind":"manual","author":"local-user"}';
-      ALTER TABLE rules ADD COLUMN confidence TEXT NOT NULL DEFAULT 'medium';
-      ALTER TABLE rules ADD COLUMN last_used_at TEXT;
-      ALTER TABLE rules ADD COLUMN superseded_by TEXT;
-      ALTER TABLE rules ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'local';
-      ALTER TABLE rules ADD COLUMN updated_at TEXT;
-      UPDATE rules SET updated_at = created_at WHERE updated_at IS NULL;
-      UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
-    `);
+  if (version < 2 || hasMissingRuleMemoryColumns(db)) {
+    db.exec("BEGIN");
+    try {
+      addRuleColumnIfMissing(db, "memory_type", "TEXT NOT NULL DEFAULT 'rule'");
+      addRuleColumnIfMissing(
+        db,
+        "scope",
+        `TEXT NOT NULL DEFAULT '{"type":"project","value":null}'`
+      );
+      addRuleColumnIfMissing(
+        db,
+        "source",
+        `TEXT NOT NULL DEFAULT '{"kind":"manual","author":"local-user"}'`
+      );
+      addRuleColumnIfMissing(db, "confidence", "TEXT NOT NULL DEFAULT 'medium'");
+      addRuleColumnIfMissing(db, "last_used_at", "TEXT");
+      addRuleColumnIfMissing(db, "superseded_by", "TEXT");
+      addRuleColumnIfMissing(db, "sync_status", "TEXT NOT NULL DEFAULT 'local'");
+      addRuleColumnIfMissing(db, "updated_at", "TEXT");
+      db.prepare("UPDATE rules SET updated_at = created_at WHERE updated_at IS NULL").run();
+      db.prepare("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'").run();
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   db.exec(`
@@ -356,6 +373,39 @@ function migrateSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_memory_usages_project_injected
       ON memory_usages (project_id, injected_at DESC);
   `);
+}
+
+function hasMissingRuleMemoryColumns(db: DatabaseSync): boolean {
+  const columns = getRuleColumns(db);
+  return [
+    "memory_type",
+    "scope",
+    "source",
+    "confidence",
+    "last_used_at",
+    "superseded_by",
+    "sync_status",
+    "updated_at"
+  ].some((column) => !columns.has(column));
+}
+
+function addRuleColumnIfMissing(
+  db: DatabaseSync,
+  column: string,
+  definition: string
+): void {
+  const columns = getRuleColumns(db);
+  if (columns.has(column)) return;
+  db.exec(`ALTER TABLE rules ADD COLUMN ${column} ${definition}`);
+}
+
+function getRuleColumns(db: DatabaseSync): Set<string> {
+  return new Set(
+    db
+      .prepare("PRAGMA table_info(rules)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name))
+  );
 }
 
 function dedupeRules(rules: PlaybookRule[]): PlaybookRule[] {
@@ -424,17 +474,17 @@ function mapRule(row: Record<string, unknown>): PlaybookRule {
   return {
     id: String(row.id),
     projectId: String(row.project_id),
-    status: row.status as PlaybookRule["status"],
+    status: ruleStatusSchema.parse(row.status),
     category: String(row.category),
     rule: String(row.rule),
     reason: String(row.reason),
     sourceEventId: row.source_event_id === null ? null : String(row.source_event_id),
     createdAt: String(row.created_at),
     approvedAt: row.approved_at === null ? null : String(row.approved_at),
-    memoryType: String(row.memory_type ?? "rule") as PlaybookRule["memoryType"],
+    memoryType: memoryTypeSchema.parse(row.memory_type ?? "rule"),
     scope,
     source,
-    confidence: String(row.confidence ?? "medium") as PlaybookRule["confidence"],
+    confidence: memoryConfidenceSchema.parse(row.confidence ?? "medium"),
     lastUsedAt:
       row.last_used_at === null || row.last_used_at === undefined
         ? null
@@ -443,7 +493,7 @@ function mapRule(row: Record<string, unknown>): PlaybookRule {
       row.superseded_by === null || row.superseded_by === undefined
         ? null
         : String(row.superseded_by),
-    syncStatus: String(row.sync_status ?? "local") as PlaybookRule["syncStatus"],
+    syncStatus: memorySyncStatusSchema.parse(row.sync_status ?? "local"),
     updatedAt: String(row.updated_at ?? row.created_at)
   };
 }

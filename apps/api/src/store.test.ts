@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore } from "./store.js";
 
 describe("store", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("approves a candidate rule and exports only approved rules", () => {
     const store = createStore(":memory:");
     const session = store.createSession({ projectId: "demo", title: "Demo session" });
@@ -38,7 +46,9 @@ describe("store", () => {
         "idx_sessions_project_created",
         "idx_events_session_created",
         "idx_rules_project_status_created",
-        "idx_rules_project_status_approved"
+        "idx_rules_project_status_approved",
+        "idx_memory_usages_memory_injected",
+        "idx_memory_usages_project_injected"
       ])
     );
   });
@@ -64,4 +74,156 @@ describe("store", () => {
     expect(candidate.syncStatus).toBe("local");
     expect(candidate.updatedAt).toBe(candidate.createdAt);
   });
+
+  it("updates rule updatedAt when approving and rejecting", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const store = createStore(":memory:");
+
+    const candidate = store.createRuleCandidate({
+      projectId: "demo",
+      category: "tooling",
+      rule: "Use pnpm for package operations.",
+      reason: "The workspace is configured for pnpm.",
+      sourceEventId: null
+    });
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:01.000Z"));
+    const approved = store.approveRule(candidate.id);
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:02.000Z"));
+    const rejected = store.rejectRule(candidate.id);
+
+    expect(approved.updatedAt).toBe("2026-01-01T00:00:01.000Z");
+    expect(rejected.updatedAt).toBe("2026-01-01T00:00:02.000Z");
+  });
+
+  it("migrates existing v1 rule rows with memory defaults", () => {
+    const path = createTempDbPath();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1');
+      INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at
+      ) VALUES (
+        'rule_existing', 'demo', 'pending', 'tooling', 'Use pnpm.', 'Legacy v1 row.',
+        NULL, '2026-01-01T00:00:00.000Z', NULL
+      );
+    `);
+    db.close();
+
+    const store = createStore(path);
+    const rule = store.getRule("rule_existing");
+
+    expect(store.inspectSchema().schemaVersion).toBe(2);
+    expect(rule).toMatchObject({
+      memoryType: "rule",
+      scope: { type: "project", value: null },
+      source: { kind: "manual", author: "local-user" },
+      confidence: "medium",
+      syncStatus: "local",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+  });
+
+  it("resumes a partially applied v2 migration without duplicate alter failures", () => {
+    const path = createTempDbPath();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT,
+        memory_type TEXT NOT NULL DEFAULT 'rule'
+      );
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1');
+      INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at, memory_type
+      ) VALUES (
+        'rule_partial', 'demo', 'pending', 'tooling', 'Use pnpm.', 'Partially migrated row.',
+        NULL, '2026-01-01T00:00:00.000Z', NULL, 'rule'
+      );
+    `);
+    db.close();
+
+    const store = createStore(path);
+    const rule = store.getRule("rule_partial");
+
+    expect(store.inspectSchema().schemaVersion).toBe(2);
+    expect(rule?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("validates persisted rule enum values when mapping rows", () => {
+    const path = createTempDbPath();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT,
+        memory_type TEXT NOT NULL DEFAULT 'rule',
+        scope TEXT NOT NULL DEFAULT '{"type":"project","value":null}',
+        source TEXT NOT NULL DEFAULT '{"kind":"manual","author":"local-user"}',
+        confidence TEXT NOT NULL DEFAULT 'medium',
+        last_used_at TEXT,
+        superseded_by TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'local',
+        updated_at TEXT
+      );
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO schema_meta (key, value) VALUES ('schema_version', '2');
+      INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at,
+        memory_type, scope, source, confidence, last_used_at, superseded_by, sync_status, updated_at
+      ) VALUES (
+        'rule_invalid', 'demo', 'pending', 'tooling', 'Use pnpm.', 'Invalid enum row.',
+        NULL, '2026-01-01T00:00:00.000Z', NULL, 'not-a-memory-type',
+        '{"type":"project","value":null}', '{"kind":"manual","author":"local-user"}',
+        'medium', NULL, NULL, 'local', '2026-01-01T00:00:00.000Z'
+      );
+    `);
+    db.close();
+
+    const store = createStore(path);
+
+    expect(() => store.getRule("rule_invalid")).toThrow();
+  });
 });
+
+function createTempDbPath(): string {
+  return join(mkdtempSync(join(tmpdir(), "signal-recycler-store-")), "store.sqlite");
+}
