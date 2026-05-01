@@ -408,7 +408,7 @@ function DemoImpactPanel({ result }: { result: DemoRunResult }) {
           subtitle={
             result.phase1.rulesCreated
               ? `${result.phase1.rulesCreated} memory candidate(s) extracted`
-              : "No memory in playbook"
+              : "No memory yet"
           }
           response={result.phase1.finalResponse}
           stats={[
