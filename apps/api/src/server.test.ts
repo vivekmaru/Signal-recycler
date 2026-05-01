@@ -197,6 +197,84 @@ describe("api", () => {
     });
   });
 
+  it("returns memory audit trail with source and usages", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm.",
+        source: { kind: "manual", author: "local-user" },
+        confidence: "high"
+      }).id
+    );
+    const event = store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Injected memory",
+      body: "Injected 1 memory.",
+      metadata: { projectId: "demo", memoryIds: [memory.id] }
+    });
+    store.recordMemoryUsage({
+      projectId: "demo",
+      memoryId: memory.id,
+      sessionId: "proxy",
+      eventId: event.id,
+      adapter: "proxy",
+      reason: "approved_project_memory"
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/memories/${memory.id}/audit`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      memory: { id: memory.id, source: { kind: "manual", author: "local-user" } },
+      usages: [{ memoryId: memory.id, adapter: "proxy" }]
+    });
+  });
+
+  it("returns 404 for a memory audit trail outside the current project", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      projectId: "demo",
+      workingDirectory: "/tmp/demo",
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other",
+        category: "package-manager",
+        rule: "Use npm for this other workspace.",
+        reason: "The other workspace uses npm.",
+        source: { kind: "manual", author: "local-user" },
+        confidence: "high"
+      }).id
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/memories/${memory.id}/audit`
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: "Memory not found" });
+  });
+
   it("creates a manually approved playbook rule", async () => {
     const app = await createApp({
       ...TEST_APP_OPTIONS,

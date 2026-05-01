@@ -57,6 +57,18 @@ export async function registerRuleRoutes(
     return options.store.approveRule(memory.id);
   });
 
+  app.get("/api/memories/:id/audit", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const memory = options.store.getRule(id);
+    if (!memory || memory.projectId !== projectId) {
+      return reply.code(404).send({ error: "Memory not found" });
+    }
+    return {
+      memory,
+      usages: options.store.listMemoryUsages(id)
+    };
+  });
+
   app.get("/api/rules", async () => options.store.listRules(projectId));
 
   app.post("/api/rules", async (request, reply) => {
