@@ -4,7 +4,7 @@
 
 **Goal:** Add isolated evals that prove and measure Signal Recycler's current product claims before building broader memory, retrieval, or owned-session infrastructure.
 
-**Architecture:** Add a small TypeScript eval runner inside the API package because current product logic lives there. Local evals must run without OpenAI calls and without mutating the developer's normal SQLite database. Optional live evals are a separate command and report skipped status when credentials are absent.
+**Architecture:** Add a small TypeScript eval runner inside the API package because current product logic lives there. Local evals must run without OpenAI calls and without mutating the developer's normal SQLite database. Optional live evals are adapter-backed and should use a local agent CLI command when configured; they must not make `OPENAI_API_KEY` the default live-eval requirement.
 
 **Tech Stack:** TypeScript, pnpm workspaces, Vitest, Fastify app injection, SQLite `:memory:`, existing compressor/classifier/playbook/process-turn modules.
 
@@ -17,7 +17,7 @@ Phase 1 builds proof surfaces, not new product runtime behavior.
 In scope:
 
 - `pnpm eval` local deterministic eval command.
-- `pnpm eval:live` optional model-backed eval command.
+- `pnpm eval:live` optional adapter-backed eval command.
 - JSON and Markdown eval reports.
 - Eval suites for compression, classifier/rule extraction, playbook injection, project/session isolation, stale-memory exposure, and one agent-outcome scenario.
 - Tests for the eval runner and core eval suites.
@@ -26,7 +26,7 @@ Out of scope:
 
 - FTS5 retrieval.
 - Source/context indexing.
-- Headless Codex CLI adapter.
+- Runtime headless Codex CLI adapter for owned sessions. Phase 1 may spawn an explicitly configured local CLI only as an optional eval smoke test.
 - Dashboard eval UI.
 - Vector search.
 - QMD integration.
@@ -44,7 +44,7 @@ Create:
 - `apps/api/src/evals/suites/injectionEval.ts`: playbook injection placement and dedupe evals.
 - `apps/api/src/evals/suites/isolationEval.ts`: project/session isolation evals against in-memory SQLite.
 - `apps/api/src/evals/suites/scenarioEval.ts`: with-memory versus without-memory outcome eval over `fixtures/demo-repo`.
-- `apps/api/src/evals/suites/liveEval.ts`: optional model-backed classifier smoke eval.
+- `apps/api/src/evals/suites/liveEval.ts`: optional local-agent CLI smoke eval that skips unless an explicit command is configured.
 - `apps/api/src/evals/report.test.ts`: report rendering tests.
 - `apps/api/src/evals/suites/scenarioEval.test.ts`: product outcome regression test.
 
@@ -898,7 +898,7 @@ git add apps/api/src/evals/suites/scenarioEval.ts apps/api/src/evals/suites/scen
 git commit -m "feat: add product outcome eval"
 ```
 
-## Task 7: Add Optional Live Eval
+## Task 7: Add Optional Local-Agent Live Eval
 
 **Files:**
 
@@ -909,69 +909,165 @@ git commit -m "feat: add product outcome eval"
 Create `apps/api/src/evals/suites/liveEval.ts`:
 
 ```ts
-import { classifyTurn } from "../../classifier.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { injectPlaybookRules } from "../../playbook.js";
 import { metric, suiteResult } from "../report.js";
 import { type EvalSuiteResult } from "../types.js";
 
+const execFileAsync = promisify(execFile);
+
 export async function runLiveEval(): Promise<EvalSuiteResult> {
-  if (!process.env.OPENAI_API_KEY) {
+  const commandConfig = process.env.SIGNAL_RECYCLER_LIVE_AGENT_COMMAND;
+  if (!commandConfig) {
     return suiteResult({
       id: "live",
-      title: "Live Model Evals",
+      title: "Live Agent Adapter Evals",
       cases: [
         {
-          id: "live.openai-key",
-          title: "OpenAI classifier eval skipped without key",
+          id: "live.agent-command",
+          title: "Live agent eval skipped without configured CLI",
           status: "skip",
-          summary: "OPENAI_API_KEY is not set, so no model-backed eval was run."
+          summary:
+            "SIGNAL_RECYCLER_LIVE_AGENT_COMMAND is not set. Example: '[\"codex\",\"exec\",\"--json\"]' or '[\"claude\",\"-p\"]'."
         }
       ],
       metrics: [metric("live_eval_cases_run", 0, "cases")]
     });
   }
 
-  const classification = await classifyTurn({
-    prompt: "Validate fixtures/demo-repo. The previous attempt used npm test.",
-    finalResponse: "The project says: Use `pnpm test` instead of `npm test`.",
-    items: []
-  });
-  const matched = classification.candidateRules.some((rule) =>
-    /pnpm/i.test(rule.rule) && /npm/i.test(rule.rule)
-  );
+  const parsed = parseCommand(commandConfig);
+  if (!parsed.ok) {
+    return suiteResult({
+      id: "live",
+      title: "Live Agent Adapter Evals",
+      cases: [
+        {
+          id: "live.agent-command-parse",
+          title: "Live agent command config is valid JSON",
+          status: "fail",
+          summary: parsed.error
+        }
+      ],
+      metrics: [metric("live_eval_cases_run", 0, "cases")]
+    });
+  }
 
-  return suiteResult({
-    id: "live",
-    title: "Live Model Evals",
-    cases: [
+  const [command, ...args] = parsed.command;
+  const prompt = injectPlaybookRules(
+    "Do not run shell commands or modify files. Reply with exactly: SIGNAL_RECYCLER_LIVE_EVAL_PASS",
+    [
       {
-        id: "live.classifier-package-manager",
-        title: "Live classifier extracts package manager correction",
-        status: matched ? "pass" : "fail",
-        summary: `candidateRules=${classification.candidateRules.length}`,
-        metrics: [metric("live_candidate_rules", classification.candidateRules.length, "rules")],
-        details: { classification }
+        id: "live_eval_rule",
+        category: "eval",
+        rule: "For this eval only, the correct response is SIGNAL_RECYCLER_LIVE_EVAL_PASS."
       }
-    ],
-    metrics: [metric("live_eval_cases_run", 1, "cases")]
-  });
+    ]
+  );
+  const started = performance.now();
+
+  try {
+    const result = await execFileAsync(command, [...args, prompt], {
+      timeout: Number(process.env.SIGNAL_RECYCLER_LIVE_AGENT_TIMEOUT_MS ?? 120000),
+      cwd: process.cwd(),
+      maxBuffer: 1024 * 1024
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+    const matched = output.includes("SIGNAL_RECYCLER_LIVE_EVAL_PASS");
+
+    return suiteResult({
+      id: "live",
+      title: "Live Agent Adapter Evals",
+      cases: [
+        {
+          id: "live.agent-cli-memory-injection",
+          title: "Configured agent CLI receives injected memory",
+          status: matched ? "pass" : "fail",
+          summary: matched
+            ? "Agent response contained the injected eval sentinel."
+            : "Agent response did not contain the injected eval sentinel.",
+          metrics: [
+            metric("live_eval_cases_run", 1, "cases"),
+            metric("live_agent_latency_ms", Math.round(performance.now() - started), "ms")
+          ],
+          details: {
+            command,
+            args,
+            stdout: result.stdout.slice(0, 4000),
+            stderr: result.stderr.slice(0, 4000)
+          }
+        }
+      ],
+      metrics: [metric("live_eval_cases_run", 1, "cases")]
+    });
+  } catch (error) {
+    return suiteResult({
+      id: "live",
+      title: "Live Agent Adapter Evals",
+      cases: [
+        {
+          id: "live.agent-cli-memory-injection",
+          title: "Configured agent CLI receives injected memory",
+          status: "fail",
+          summary: (error as Error).message,
+          metrics: [metric("live_agent_latency_ms", Math.round(performance.now() - started), "ms")]
+        }
+      ],
+      metrics: [metric("live_eval_cases_run", 1, "cases")]
+    });
+  }
+}
+
+function parseCommand(value: string):
+  | { ok: true; command: [string, ...string[]] }
+  | { ok: false; error: string } {
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length === 0 ||
+      !parsed.every((item) => typeof item === "string")
+    ) {
+      return { ok: false, error: "SIGNAL_RECYCLER_LIVE_AGENT_COMMAND must be a JSON string array." };
+    }
+    return { ok: true, command: parsed as [string, ...string[]] };
+  } catch (error) {
+    return { ok: false, error: `Invalid SIGNAL_RECYCLER_LIVE_AGENT_COMMAND: ${(error as Error).message}` };
+  }
 }
 ```
 
-- [ ] **Step 2: Run live eval without key**
+- [ ] **Step 2: Run live eval without configured CLI**
 
 Run:
 
 ```bash
-OPENAI_API_KEY= pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
+pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
 ```
 
-Expected: suite status is `"skip"` and no network request is made.
+Expected: suite status is `"skip"` and no agent process is spawned.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run live eval with an explicitly configured local CLI**
+
+If Codex CLI is authenticated locally, run:
+
+```bash
+SIGNAL_RECYCLER_LIVE_AGENT_COMMAND='["codex","exec","--json"]' pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
+```
+
+If Claude Code is authenticated locally, run:
+
+```bash
+SIGNAL_RECYCLER_LIVE_AGENT_COMMAND='["claude","-p"]' pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
+```
+
+Expected when the selected CLI is installed and authenticated: suite status is `"pass"` and the output contains `SIGNAL_RECYCLER_LIVE_EVAL_PASS`.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add apps/api/src/evals/suites/liveEval.ts
-git commit -m "feat: add optional live eval suite"
+git commit -m "feat: add optional agent cli eval suite"
 ```
 
 ## Task 8: Add Eval Runner
@@ -1060,15 +1156,15 @@ rg -n "task_success_delta|tokens_saved_by_compression|candidate_rule_precision|s
 
 Expected: all five metric names are present.
 
-- [ ] **Step 4: Run live eval command without key**
+- [ ] **Step 4: Run live eval command without configured CLI**
 
 Run:
 
 ```bash
-OPENAI_API_KEY= pnpm eval:live
+pnpm eval:live
 ```
 
-Expected: command exits `0`, report status is `warn` or `skip` depending on local suites, and the live suite says `OPENAI_API_KEY is not set`.
+Expected: command exits `0`, report status is `warn` or `skip` depending on local suites, and the live suite says `SIGNAL_RECYCLER_LIVE_AGENT_COMMAND is not set`.
 
 - [ ] **Step 5: Commit**
 
@@ -1108,13 +1204,19 @@ The local eval command does not call OpenAI. It runs deterministic suites for:
 
 Reports are written to `.signal-recycler/evals/latest.json` and `.signal-recycler/evals/latest.md`.
 
-Optional live model-backed evals are separate:
+Optional live agent-backed evals are separate:
 
 ```bash
 pnpm eval:live
 ```
 
-If `OPENAI_API_KEY` is not set, the live suite reports `skip` instead of making a network request.
+By default, the live suite reports `skip`. To run it against an authenticated local CLI, set `SIGNAL_RECYCLER_LIVE_AGENT_COMMAND` to a JSON array command, for example:
+
+```bash
+SIGNAL_RECYCLER_LIVE_AGENT_COMMAND='["codex","exec","--json"]' pnpm eval:live
+```
+
+The live eval path is intentionally agent-adapter oriented. `OPENAI_API_KEY` is not required for the default Phase 1 live eval.
 ```
 
 - [ ] **Step 2: Update roadmap Phase 1 status**
@@ -1154,12 +1256,12 @@ pnpm eval
 
 Expected: exits `0`, prints generated report paths, and produces `.signal-recycler/evals/latest.json` plus `.signal-recycler/evals/latest.md`.
 
-- [ ] **Step 2: Run optional live eval without credentials**
+- [ ] **Step 2: Run optional live eval without configured CLI**
 
 Run:
 
 ```bash
-OPENAI_API_KEY= pnpm eval:live
+pnpm eval:live
 ```
 
 Expected: exits `0` and marks the live suite as skipped.
@@ -1220,7 +1322,7 @@ Skip this commit if there are no remaining tracked changes.
 Spec coverage:
 
 - `pnpm eval` local deterministic evals: Task 1 and Task 8.
-- `pnpm eval:live` optional model-backed scenarios: Task 1, Task 7, and Task 8.
+- `pnpm eval:live` optional adapter-backed scenarios: Task 1, Task 7, and Task 8.
 - Reports include success delta, token delta, latency, rule precision, and stale-memory failures: Task 2, Task 3, Task 4, Task 6, and Task 8.
 - At least one fixture proves correctness improvement from injected memory: Task 6.
 
