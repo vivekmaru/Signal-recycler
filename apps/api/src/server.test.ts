@@ -81,17 +81,101 @@ describe("api", () => {
       title: "Tracked event",
       body: "Visible in dashboard firehose"
     });
+    const otherSession = store.createSession({
+      projectId: "other-project",
+      title: "Other Firehose"
+    });
+    store.createEvent({
+      sessionId: otherSession.id,
+      category: "codex_event",
+      title: "Other project event",
+      body: "Hidden from this dashboard"
+    });
+    store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Current proxy event",
+      body: "Visible proxy event",
+      metadata: { projectId: TEST_APP_OPTIONS.projectId }
+    });
+    store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Other proxy event",
+      body: "Hidden proxy event",
+      metadata: { projectId: "other-project" }
+    });
 
     const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=10" });
 
     expect(response.statusCode).toBe(200);
+    const titles = response.json().map((event: { title: string }) => event.title);
+    expect(titles).toEqual(expect.arrayContaining(["Tracked event", "Current proxy event"]));
+    expect(titles).not.toEqual(expect.arrayContaining(["Other project event", "Other proxy event"]));
+  });
+
+  it("lists only sessions for the current project", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const current = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Current project"
+    });
+    store.createSession({
+      projectId: "other-project",
+      title: "Other project"
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/sessions" });
+
+    expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual([
-      expect.objectContaining({
-        sessionId: session.id,
-        category: "codex_event",
-        title: "Tracked event"
-      })
+      expect.objectContaining({ id: current.id, title: "Current project" })
     ]);
+  });
+
+  it("does not expose another project's session events", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const otherSession = store.createSession({
+      projectId: "other-project",
+      title: "Other project"
+    });
+    store.createEvent({
+      sessionId: otherSession.id,
+      category: "memory_injection",
+      title: "Other project memory",
+      body: "Hidden",
+      metadata: { projectId: "other-project" }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${otherSession.id}/events`
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: "Session not found" });
+
+    const run = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${otherSession.id}/run`,
+      payload: { prompt: "Should not run" }
+    });
+    expect(run.statusCode).toBe(404);
+    expect(run.json()).toMatchObject({ error: "Session not found" });
   });
 
   it("creates rule candidates during a run and emits ordered events", async () => {
@@ -379,6 +463,36 @@ describe("api", () => {
       error: "Invalid memoryType",
       message: "/api/rules only accepts memoryType \"rule\""
     });
+  });
+
+  it("does not approve or reject rules outside the current project", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const otherRule = store.createRuleCandidate({
+      projectId: "other-project",
+      category: "package-manager",
+      rule: "Use npm for this other project.",
+      reason: "Other project convention."
+    });
+
+    const approve = await app.inject({
+      method: "POST",
+      url: `/api/rules/${otherRule.id}/approve`
+    });
+    const reject = await app.inject({
+      method: "POST",
+      url: `/api/rules/${otherRule.id}/reject`
+    });
+
+    expect(approve.statusCode).toBe(404);
+    expect(reject.statusCode).toBe(404);
+    expect(store.getRule(otherRule.id)?.status).toBe("pending");
   });
 
   it("returns a clear gateway error when the Codex runner fails", async () => {

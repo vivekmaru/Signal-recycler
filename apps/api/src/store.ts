@@ -53,6 +53,14 @@ type RecordMemoryUsageInput = {
   reason: string;
 };
 
+type RecordMemoryInjectionEventInput = {
+  sessionId: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+  usages: Array<Omit<RecordMemoryUsageInput, "eventId">>;
+};
+
 export type SignalRecyclerStore = ReturnType<typeof createStore>;
 
 export function createStore(path: string) {
@@ -123,11 +131,14 @@ export function createStore(path: string) {
       return session;
     },
 
-    listSessions(): SessionRecord[] {
-      return db
-        .prepare("SELECT * FROM sessions ORDER BY created_at DESC")
-        .all()
-        .map(mapSession);
+    listSessions(projectId?: string): SessionRecord[] {
+      if (projectId) {
+        return db
+          .prepare("SELECT * FROM sessions WHERE project_id = ? ORDER BY created_at DESC")
+          .all(projectId)
+          .map(mapSession);
+      }
+      return db.prepare("SELECT * FROM sessions ORDER BY created_at DESC").all().map(mapSession);
     },
 
     getSession(id: string): SessionRecord | null {
@@ -170,6 +181,21 @@ export function createStore(path: string) {
       return db
         .prepare("SELECT * FROM events ORDER BY created_at DESC LIMIT ?")
         .all(limit)
+        .map(mapEvent);
+    },
+
+    listAllEventsForProject(projectId: string, limit = 100): TimelineEvent[] {
+      return db
+        .prepare(
+          `SELECT events.*
+           FROM events
+           LEFT JOIN sessions ON sessions.id = events.session_id
+           WHERE sessions.project_id = ?
+              OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
+           ORDER BY events.created_at DESC
+           LIMIT ?`
+        )
+        .all(projectId, projectId, limit)
         .map(mapEvent);
     },
 
@@ -319,6 +345,77 @@ export function createStore(path: string) {
       return usage;
     },
 
+    recordMemoryInjectionEvent(input: RecordMemoryInjectionEventInput): TimelineEvent {
+      if (input.usages.length === 0) throw new Error("Memory injection requires usages");
+      for (const usage of input.usages) {
+        const memoryRow = db
+          .prepare(
+            "SELECT * FROM rules WHERE id = ? AND project_id = ? AND status = 'approved' AND superseded_by IS NULL"
+          )
+          .get(usage.memoryId, usage.projectId);
+        if (!memoryRow) throw new Error(`Rule is not injectable: ${usage.memoryId}`);
+      }
+
+      const timestamp = now();
+      const event: TimelineEvent = {
+        id: createId("event"),
+        sessionId: input.sessionId,
+        category: "memory_injection",
+        title: input.title,
+        body: input.body,
+        metadata: input.metadata,
+        createdAt: timestamp
+      };
+
+      db.exec("BEGIN");
+      try {
+        db.prepare(
+          "INSERT INTO events (id, session_id, category, title, body, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          event.id,
+          event.sessionId,
+          event.category,
+          event.title,
+          event.body,
+          JSON.stringify(event.metadata),
+          event.createdAt
+        );
+
+        for (const usageInput of input.usages) {
+          const usageId = createId("usage");
+          db.prepare(
+            `INSERT INTO memory_usages (
+              id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          ).run(
+            usageId,
+            usageInput.projectId,
+            usageInput.memoryId,
+            usageInput.sessionId,
+            event.id,
+            usageInput.adapter,
+            usageInput.reason,
+            timestamp
+          );
+          const result = db
+            .prepare(
+              `UPDATE rules
+               SET last_used_at = ?, updated_at = ?
+               WHERE id = ? AND project_id = ? AND status = 'approved' AND superseded_by IS NULL`
+            )
+            .run(timestamp, timestamp, usageInput.memoryId, usageInput.projectId);
+          if (result.changes !== 1) throw new Error(`Rule is not injectable: ${usageInput.memoryId}`);
+        }
+
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+
+      return event;
+    },
+
     listMemoryUsages(memoryId: string): MemoryUsage[] {
       return db
         .prepare(
@@ -362,7 +459,13 @@ export function createStore(path: string) {
       return rule;
     },
 
-    clearProjectMemory(projectId: string): { rulesDeleted: number; eventsDeleted: number; sessionsDeleted: number } {
+    clearProjectMemory(projectId: string): {
+      rulesDeleted: number;
+      eventsDeleted: number;
+      sessionsDeleted: number;
+      memoryUsagesDeleted: number;
+    } {
+      const usagesResult = db.prepare("DELETE FROM memory_usages WHERE project_id = ?").run(projectId);
       const rulesResult = db
         .prepare("DELETE FROM rules WHERE project_id = ?")
         .run(projectId);
@@ -387,7 +490,8 @@ export function createStore(path: string) {
       return {
         rulesDeleted: Number(rulesResult.changes),
         eventsDeleted,
-        sessionsDeleted: Number(sessionsResult.changes)
+        sessionsDeleted: Number(sessionsResult.changes),
+        memoryUsagesDeleted: Number(usagesResult.changes)
       };
     },
 
@@ -455,6 +559,19 @@ function migrateSchema(db: DatabaseSync): void {
       addRuleColumnIfMissing(db, "sync_status", "TEXT NOT NULL DEFAULT 'local'");
       addRuleColumnIfMissing(db, "updated_at", "TEXT");
       db.prepare("UPDATE rules SET updated_at = created_at WHERE updated_at IS NULL").run();
+      db.prepare(
+        `UPDATE rules
+         SET source = json_object(
+           'kind', 'event',
+           'sessionId', COALESCE(
+             (SELECT events.session_id FROM events WHERE events.id = rules.source_event_id),
+             'unknown'
+           ),
+           'eventId', source_event_id
+         )
+         WHERE source_event_id IS NOT NULL
+           AND source = '{"kind":"manual","author":"local-user"}'`
+      ).run();
       db.prepare("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'").run();
       db.exec("COMMIT");
     } catch (error) {

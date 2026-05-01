@@ -18,9 +18,8 @@ export function recordMemoryInjection(input: RecordMemoryInjectionInput): void {
     assertInjectableMemory(input.store, input.projectId, memory);
   }
 
-  const event = input.store.createEvent({
+  input.store.recordMemoryInjectionEvent({
     sessionId: input.sessionId,
-    category: "memory_injection",
     title: `Injected ${input.memories.length} memor${input.memories.length === 1 ? "y" : "ies"}`,
     body: input.memories.map((memory) => `- ${memory.category}: ${memory.rule}`).join("\n"),
     metadata: {
@@ -35,19 +34,15 @@ export function recordMemoryInjection(input: RecordMemoryInjectionInput): void {
         scope: memory.scope,
         syncStatus: memory.syncStatus
       }))
-    }
-  });
-
-  for (const memory of input.memories) {
-    input.store.recordMemoryUsage({
+    },
+    usages: input.memories.map((memory) => ({
       projectId: input.projectId,
       memoryId: memory.id,
       sessionId: input.sessionId,
-      eventId: event.id,
       adapter: input.adapter,
       reason: input.reason
-    });
-  }
+    }))
+  });
 }
 
 function assertInjectableMemory(

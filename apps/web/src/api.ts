@@ -89,7 +89,12 @@ export async function runDemo(): Promise<DemoRunResult> {
   return readJson(response);
 }
 
-export async function resetMemory(): Promise<{ rulesDeleted: number; eventsDeleted: number; sessionsDeleted: number }> {
+export async function resetMemory(): Promise<{
+  rulesDeleted: number;
+  eventsDeleted: number;
+  sessionsDeleted: number;
+  memoryUsagesDeleted: number;
+}> {
   return readJson(await fetch("/api/memory/reset", { method: "POST" }));
 }
 

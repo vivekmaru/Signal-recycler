@@ -95,13 +95,21 @@ export async function registerRuleRoutes(
     return options.store.approveRule(rule.id);
   });
 
-  app.post("/api/rules/:id/approve", async (request) => {
+  app.post("/api/rules/:id/approve", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const rule = options.store.getRule(id);
+    if (!rule || rule.projectId !== projectId) {
+      return reply.code(404).send({ error: "Rule not found" });
+    }
     return options.store.approveRule(id);
   });
 
-  app.post("/api/rules/:id/reject", async (request) => {
+  app.post("/api/rules/:id/reject", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const rule = options.store.getRule(id);
+    if (!rule || rule.projectId !== projectId) {
+      return reply.code(404).send({ error: "Rule not found" });
+    }
     return options.store.rejectRule(id);
   });
 

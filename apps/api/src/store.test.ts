@@ -132,6 +132,86 @@ describe("store", () => {
     expect(store.listMemoryUsages(memory.id)).toEqual([usage]);
   });
 
+  it("records memory injection events and usages atomically", () => {
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+
+    const event = store.recordMemoryInjectionEvent({
+      sessionId: "session_1",
+      title: "Injected memory",
+      body: "Injected 1 memory.",
+      metadata: { projectId: "demo", memoryIds: [memory.id] },
+      usages: [
+        {
+          projectId: "demo",
+          memoryId: memory.id,
+          sessionId: "session_1",
+          adapter: "proxy",
+          reason: "approved_project_memory"
+        }
+      ]
+    });
+
+    expect(event.category).toBe("memory_injection");
+    expect(store.listMemoryUsages(memory.id)).toEqual([
+      expect.objectContaining({ eventId: event.id, memoryId: memory.id })
+    ]);
+  });
+
+  it("does not leave partial injection audit rows when a memory is not injectable", () => {
+    const store = createStore(":memory:");
+    const approved = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const pending = store.createRuleCandidate({
+      projectId: "demo",
+      category: "editor",
+      rule: "Use the project editor settings.",
+      reason: "Pending memory."
+    });
+
+    expect(() =>
+      store.recordMemoryInjectionEvent({
+        sessionId: "session_1",
+        title: "Injected memories",
+        body: "Injected 2 memories.",
+        metadata: { projectId: "demo", memoryIds: [approved.id, pending.id] },
+        usages: [
+          {
+            projectId: "demo",
+            memoryId: approved.id,
+            sessionId: "session_1",
+            adapter: "proxy",
+            reason: "approved_project_memory"
+          },
+          {
+            projectId: "demo",
+            memoryId: pending.id,
+            sessionId: "session_1",
+            adapter: "proxy",
+            reason: "approved_project_memory"
+          }
+        ]
+      })
+    ).toThrow(`Rule is not injectable: ${pending.id}`);
+
+    expect(store.listEvents("session_1")).toEqual([]);
+    expect(store.listMemoryUsages(approved.id)).toEqual([]);
+    expect(store.listMemoryUsages(pending.id)).toEqual([]);
+  });
+
   it("lists memory usages scoped to a project", () => {
     const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-store-")), "test.sqlite");
     const store = createStore(databasePath);
@@ -176,6 +256,38 @@ describe("store", () => {
     db.close();
 
     expect(store.listMemoryUsagesForProject("demo", memory.id)).toEqual([usage]);
+  });
+
+  it("clears memory usage audit rows during project memory reset", () => {
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const event = store.createEvent({
+      sessionId: "proxy",
+      category: "memory_injection",
+      title: "Injected memory",
+      body: "Injected 1 memory.",
+      metadata: { projectId: "demo", memoryIds: [memory.id] }
+    });
+    store.recordMemoryUsage({
+      projectId: "demo",
+      memoryId: memory.id,
+      sessionId: "proxy",
+      eventId: event.id,
+      adapter: "proxy",
+      reason: "approved_project_memory"
+    });
+
+    const result = store.clearProjectMemory("demo");
+
+    expect(result.memoryUsagesDeleted).toBe(1);
+    expect(store.listMemoryUsages(memory.id)).toEqual([]);
   });
 
   it("does not record memory usage for nonexistent memory", () => {
@@ -456,6 +568,67 @@ describe("store", () => {
       confidence: "medium",
       syncStatus: "local",
       updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+  });
+
+  it("migrates existing v1 extracted rule rows with event provenance", () => {
+    const path = createTempDbPath();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        metadata TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1');
+      INSERT INTO sessions (id, project_id, title, created_at)
+      VALUES ('session_existing', 'demo', 'Existing session', '2026-01-01T00:00:00.000Z');
+      INSERT INTO events (id, session_id, category, title, body, metadata, created_at)
+      VALUES (
+        'event_existing', 'session_existing', 'codex_event', 'Codex response',
+        'Use pnpm.', '{}', '2026-01-01T00:00:01.000Z'
+      );
+      INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at
+      ) VALUES (
+        'rule_existing', 'demo', 'approved', 'tooling', 'Use pnpm.', 'Learned from run.',
+        'event_existing', '2026-01-01T00:00:02.000Z', '2026-01-01T00:00:03.000Z'
+      );
+    `);
+    db.close();
+
+    const store = createStore(path);
+    const rule = store.getRule("rule_existing");
+
+    expect(rule?.source).toEqual({
+      kind: "event",
+      sessionId: "session_existing",
+      eventId: "event_existing"
     });
   });
 
