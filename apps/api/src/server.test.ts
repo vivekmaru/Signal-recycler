@@ -285,6 +285,54 @@ describe("api", () => {
     });
   });
 
+  it("previews relevant memory retrieval for a prompt", async () => {
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation", limit: 1 }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().selected.map((decision: { memoryId: string }) => decision.memoryId)).toEqual([
+      relevant.id
+    ]);
+    expect(response.json()).not.toHaveProperty("memories");
+
+    const defaultLimit = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation" }
+    });
+
+    expect(defaultLimit.statusCode).toBe(200);
+    expect(defaultLimit.json().metrics.limit).toBe(5);
+  });
+
   it("returns memory audit trail with source and usages", async () => {
     const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-api-")), "test.sqlite");
     const store = createStore(databasePath);
