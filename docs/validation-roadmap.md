@@ -307,6 +307,8 @@ Generalize from Codex playbook rules to agent/app memories with provenance.
 
 Implementation plan: `docs/superpowers/plans/2026-05-01-phase-2-memory-model-audit-trail.md`
 
+Current status: implemented locally with typed memory records, manual and synced-memory APIs, SQLite usage audit rows for injections, and compatibility-block parsing/rendering for `AGENTS.md` and `CLAUDE.md`.
+
 Success criteria:
 
 - Memory records support type, scope, source, confidence, created_at, last_used_at, superseded_by, and sync status.

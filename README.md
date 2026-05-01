@@ -88,6 +88,19 @@ Signal Recycler classifier
 Dashboard playbook
 ```
 
+## Memory Model
+
+Signal Recycler stores durable memories locally in SQLite. A memory records:
+
+- type: rule, preference, project fact, command convention, source-derived, or synced file
+- scope: project, repo path, package, file, agent, or user
+- source: manual user entry, agent event, synced instruction file, import, or source chunk
+- confidence: high, medium, or low
+- sync status: local, imported, exported, or synced
+- audit usage: every injection records the session, adapter, event, and timestamp
+
+`AGENTS.md` and `CLAUDE.md` are compatibility/export surfaces. Signal Recycler remains the runtime source of truth.
+
 ## Tech stack
 
 - Monorepo: pnpm workspaces, TypeScript
@@ -211,6 +224,15 @@ The dashboard is the main product surface:
 | `GET` | `/api/playbook/export` | Export approved rules as Markdown. |
 | `POST` | `/api/memory/reset` | Clear local demo memory for the current project. |
 | `POST` | `/proxy/*` | Proxy OpenAI-compatible Codex traffic. |
+
+### Memory APIs
+
+- `GET /api/memories`: list project memories.
+- `POST /api/memories`: create and approve a manual memory.
+- `POST /api/memories/synced`: import a memory from an `AGENTS.md` or `CLAUDE.md` compatibility block.
+- `GET /api/memories/:id/audit`: return the memory plus usage rows showing where it was injected.
+
+Legacy `/api/rules` endpoints remain available during the transition from playbook rules to general memories.
 
 ## Verification
 
