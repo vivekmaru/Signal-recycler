@@ -61,6 +61,18 @@ type RecordMemoryInjectionEventInput = {
   usages: Array<Omit<RecordMemoryUsageInput, "eventId">>;
 };
 
+type SearchApprovedMemoriesInput = {
+  projectId: string;
+  query: string;
+  limit: number;
+};
+
+type SearchApprovedMemoriesResult = {
+  memory: PlaybookRule;
+  rank: number;
+  score: number;
+};
+
 export type SignalRecyclerStore = ReturnType<typeof createStore>;
 
 export function createStore(path: string) {
@@ -244,6 +256,7 @@ export function createStore(path: string) {
         rule.syncStatus,
         rule.updatedAt
       );
+      syncMemoryFts(db, rule);
       return rule;
     },
 
@@ -254,6 +267,7 @@ export function createStore(path: string) {
       ).run(approvedAt, approvedAt, id);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
+      syncMemoryFts(db, rule);
       return rule;
     },
 
@@ -264,6 +278,7 @@ export function createStore(path: string) {
       ).run(updatedAt, id);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
+      syncMemoryFts(db, rule);
       return rule;
     },
 
@@ -288,6 +303,34 @@ export function createStore(path: string) {
         .all(projectId)
           .map(mapRule)
       );
+    },
+
+    searchApprovedMemories(input: SearchApprovedMemoriesInput): SearchApprovedMemoriesResult[] {
+      const terms = tokenizeSearchQuery(input.query);
+      if (terms.length === 0 || input.limit <= 0) return [];
+      const matchQuery = terms.map((term) => `"${term}"`).join(" OR ");
+      const rows = db
+        .prepare(
+          `SELECT rules.*, bm25(memory_fts, 0.0, 0.0, 6.0, 4.0, 2.0, 1.0) AS search_score
+           FROM memory_fts
+           JOIN rules ON rules.id = memory_fts.memory_id
+           WHERE memory_fts MATCH ?
+             AND memory_fts.project_id = ?
+             AND rules.project_id = ?
+             AND rules.status = 'approved'
+             AND rules.superseded_by IS NULL
+           ORDER BY search_score ASC, rules.approved_at ASC, rules.id ASC
+           LIMIT ?`
+        )
+        .all(matchQuery, input.projectId, input.projectId, input.limit) as Array<
+        Record<string, unknown> & { search_score: number }
+      >;
+
+      return rows.map((row, index) => ({
+        memory: mapRule(row),
+        rank: index + 1,
+        score: Math.max(0, -Number(row.search_score))
+      }));
     },
 
     recordMemoryUsage(input: RecordMemoryUsageInput): MemoryUsage {
@@ -456,6 +499,7 @@ export function createStore(path: string) {
       if (result.changes !== 1) throw new Error(`Rule not found: ${id}`);
       const rule = this.getRule(id);
       if (!rule) throw new Error(`Rule not found: ${id}`);
+      syncMemoryFts(db, rule);
       return rule;
     },
 
@@ -466,6 +510,7 @@ export function createStore(path: string) {
       memoryUsagesDeleted: number;
     } {
       const usagesResult = db.prepare("DELETE FROM memory_usages WHERE project_id = ?").run(projectId);
+      db.prepare("DELETE FROM memory_fts WHERE project_id = ?").run(projectId);
       const rulesResult = db
         .prepare("DELETE FROM rules WHERE project_id = ?")
         .run(projectId);
@@ -514,7 +559,7 @@ export function createStore(path: string) {
       return lines.join("\n");
     },
 
-    inspectSchema(): { schemaVersion: number; indexes: string[] } {
+    inspectSchema(): { schemaVersion: number; indexes: string[]; tables: string[] } {
       const versionRow = db
         .prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
         .get() as { value?: string } | undefined;
@@ -524,10 +569,17 @@ export function createStore(path: string) {
         )
         .all()
         .map((row) => String((row as { name: unknown }).name));
+      const tables = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC"
+        )
+        .all()
+        .map((row) => String((row as { name: unknown }).name));
 
       return {
         schemaVersion: Number(versionRow?.value ?? 0),
-        indexes
+        indexes,
+        tables
       };
     }
   };
@@ -587,6 +639,12 @@ function migrateSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_memory_usages_project_injected
       ON memory_usages (project_id, injected_at DESC);
   `);
+
+  if (version < 3 || !hasMemoryFtsTable(db)) {
+    ensureMemoryFtsTable(db);
+    rebuildMemoryFts(db);
+    db.prepare("UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'").run();
+  }
 }
 
 function hasMissingRuleMemoryColumns(db: DatabaseSync): boolean {
@@ -638,6 +696,96 @@ function backfillEventMemorySources(db: DatabaseSync): void {
      WHERE source_event_id IS NOT NULL
        AND source = '{"kind":"manual","author":"local-user"}'`
   ).run();
+}
+
+function ensureMemoryFtsTable(db: DatabaseSync): void {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+      memory_id UNINDEXED,
+      project_id UNINDEXED,
+      category,
+      rule,
+      reason,
+      source_text,
+      tokenize = 'porter unicode61'
+    );
+  `);
+}
+
+function hasMemoryFtsTable(db: DatabaseSync): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'")
+    .get();
+  return row !== undefined;
+}
+
+function rebuildMemoryFts(db: DatabaseSync): void {
+  db.prepare("DELETE FROM memory_fts").run();
+  db.prepare(
+    `INSERT INTO memory_fts (memory_id, project_id, category, rule, reason, source_text)
+     SELECT rules.id, rules.project_id, rules.category, rules.rule, rules.reason, COALESCE(events.body, '')
+     FROM rules
+     LEFT JOIN events ON events.id = rules.source_event_id`
+  ).run();
+}
+
+function syncMemoryFts(db: DatabaseSync, rule: PlaybookRule): void {
+  db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(rule.id);
+  db.prepare(
+    `INSERT INTO memory_fts (memory_id, project_id, category, rule, reason, source_text)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    rule.id,
+    rule.projectId,
+    rule.category,
+    rule.rule,
+    rule.reason,
+    sourceTextForRule(db, rule.sourceEventId)
+  );
+}
+
+function sourceTextForRule(db: DatabaseSync, sourceEventId: string | null): string {
+  if (!sourceEventId) return "";
+  const row = db
+    .prepare("SELECT body FROM events WHERE id = ?")
+    .get(sourceEventId) as { body?: string } | undefined;
+  return String(row?.body ?? "");
+}
+
+const SEARCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "to",
+  "with"
+]);
+
+function tokenizeSearchQuery(query: string): string[] {
+  const seen = new Set<string>();
+  const matches = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const terms: string[] = [];
+  for (const match of matches) {
+    if (SEARCH_STOP_WORDS.has(match)) continue;
+    if (seen.has(match)) continue;
+    seen.add(match);
+    terms.push(match);
+  }
+  return terms;
 }
 
 function dedupeRules(rules: PlaybookRule[]): PlaybookRule[] {
