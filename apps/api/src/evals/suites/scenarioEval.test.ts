@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runMemoryAuditEval } from "./memoryAuditEval.js";
 import { runScenarioEval } from "./scenarioEval.js";
 
 afterEach(() => {
@@ -7,6 +8,18 @@ afterEach(() => {
 });
 
 describe("scenario eval", () => {
+  it("proves memory provenance and usage audit coverage", async () => {
+    const result = await runMemoryAuditEval();
+
+    expect(result.status).toBe("pass");
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "memory_provenance_coverage", value: 1 }),
+        expect.objectContaining({ name: "memory_usage_rows", value: 2 })
+      ])
+    );
+  });
+
   it("proves injected memory can change the deterministic outcome", async () => {
     const result = await runScenarioEval();
     const correction = result.cases.find(
