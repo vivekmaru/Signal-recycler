@@ -218,6 +218,15 @@ pnpm type-check
 pnpm build
 ```
 
+For the smoke demo, run the API against a smoke database:
+
+```bash
+SIGNAL_RECYCLER_MOCK_CODEX=1 SIGNAL_RECYCLER_DB=/tmp/signal-recycler-smoke.sqlite pnpm dev
+pnpm smoke:demo
+```
+
+`pnpm smoke:demo` expects the API to be running against a smoke/test database unless `SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB=1` is set explicitly.
+
 ## Notes
 
 - Requires a Node.js version with `node:sqlite`.
