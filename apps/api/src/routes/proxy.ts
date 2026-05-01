@@ -56,17 +56,13 @@ export async function registerProxyRoutes(
       }
     }
 
-    const body = rawBody ? injectProxyBody(rawBody, rules) : undefined;
-    recordMemoryInjection({
-      store: options.store,
-      projectId: options.projectId,
-      sessionId,
-      adapter: "proxy",
-      memories: rules,
-      reason: "approved_project_memory"
-    });
+    const injection = rawBody
+      ? injectProxyBody(rawBody, rules)
+      : { body: undefined, injected: false };
+    const body = injection.body;
     const finalSize = sizeOf(body);
     const finalItems = countInputItems(body);
+    const injectedRules = injection.injected ? rules.length : 0;
 
     options.store.createEvent({
       sessionId,
@@ -81,7 +77,7 @@ export async function registerProxyRoutes(
         finalItems,
         compressions,
         tokensRemoved,
-        injectedRules: rules.length
+        injectedRules
       }),
       metadata: {
         projectId: options.projectId,
@@ -94,8 +90,8 @@ export async function registerProxyRoutes(
         compressions,
         charsRemoved,
         tokensRemoved,
-        injectedRules: rules.length,
-        ruleIds: rules.map((r) => r.id)
+        injectedRules,
+        ruleIds: injection.injected ? rules.map((r) => r.id) : []
       }
     });
     const headers = new Headers();
@@ -116,6 +112,20 @@ export async function registerProxyRoutes(
     }
 
     const upstream = await fetch(upstreamUrl, fetchInit);
+    if (injection.injected) {
+      recordMemoryInjection({
+        store: options.store,
+        projectId: options.projectId,
+        sessionId,
+        adapter: "proxy",
+        memories: rules,
+        reason: "approved_project_memory",
+        metadata: {
+          method: request.method,
+          path: tail
+        }
+      });
+    }
 
     reply.code(upstream.status);
     upstream.headers.forEach((value, key) => {
@@ -184,15 +194,22 @@ function buildProxyRequestSummary(input: {
 function injectProxyBody(
   body: unknown,
   rules: ReturnType<SignalRecyclerStore["listApprovedRules"]>
-): unknown {
+): { body: unknown; injected: boolean } {
   if (typeof body === "string") {
     try {
-      return injectIntoRequestBody(JSON.parse(body), rules);
+      const parsed = JSON.parse(body) as unknown;
+      const injectedBody = injectIntoRequestBody(parsed, rules);
+      return { body: injectedBody, injected: !jsonEqual(parsed, injectedBody) };
     } catch {
-      return body;
+      return { body, injected: false };
     }
   }
-  return injectIntoRequestBody(body, rules);
+  const injectedBody = injectIntoRequestBody(body, rules);
+  return { body: injectedBody, injected: !jsonEqual(body, injectedBody) };
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function shouldDropRequestHeader(key: string): boolean {

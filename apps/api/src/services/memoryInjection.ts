@@ -8,10 +8,15 @@ type RecordMemoryInjectionInput = {
   adapter: string;
   memories: MemoryRecord[];
   reason: string;
+  metadata?: Record<string, unknown>;
 };
 
 export function recordMemoryInjection(input: RecordMemoryInjectionInput): void {
   if (input.memories.length === 0) return;
+
+  for (const memory of input.memories) {
+    assertInjectableMemory(input.store, input.projectId, memory);
+  }
 
   const event = input.store.createEvent({
     sessionId: input.sessionId,
@@ -19,6 +24,7 @@ export function recordMemoryInjection(input: RecordMemoryInjectionInput): void {
     title: `Injected ${input.memories.length} memor${input.memories.length === 1 ? "y" : "ies"}`,
     body: input.memories.map((memory) => `- ${memory.category}: ${memory.rule}`).join("\n"),
     metadata: {
+      ...input.metadata,
       projectId: input.projectId,
       adapter: input.adapter,
       reason: input.reason,
@@ -41,5 +47,25 @@ export function recordMemoryInjection(input: RecordMemoryInjectionInput): void {
       adapter: input.adapter,
       reason: input.reason
     });
+  }
+}
+
+function assertInjectableMemory(
+  store: SignalRecyclerStore,
+  projectId: string,
+  memory: MemoryRecord
+): void {
+  const current = store.getRule(memory.id);
+  if (!current || current.projectId !== projectId) {
+    throw new Error(`Rule not found for project: ${memory.id}`);
+  }
+  if (
+    memory.projectId !== projectId ||
+    memory.status !== "approved" ||
+    memory.supersededBy !== null ||
+    current.status !== "approved" ||
+    current.supersededBy !== null
+  ) {
+    throw new Error(`Rule is not injectable: ${memory.id}`);
   }
 }
