@@ -559,19 +559,7 @@ function migrateSchema(db: DatabaseSync): void {
       addRuleColumnIfMissing(db, "sync_status", "TEXT NOT NULL DEFAULT 'local'");
       addRuleColumnIfMissing(db, "updated_at", "TEXT");
       db.prepare("UPDATE rules SET updated_at = created_at WHERE updated_at IS NULL").run();
-      db.prepare(
-        `UPDATE rules
-         SET source = json_object(
-           'kind', 'event',
-           'sessionId', COALESCE(
-             (SELECT events.session_id FROM events WHERE events.id = rules.source_event_id),
-             'unknown'
-           ),
-           'eventId', source_event_id
-         )
-         WHERE source_event_id IS NOT NULL
-           AND source = '{"kind":"manual","author":"local-user"}'`
-      ).run();
+      backfillEventMemorySources(db);
       db.prepare("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'").run();
       db.exec("COMMIT");
     } catch (error) {
@@ -579,6 +567,7 @@ function migrateSchema(db: DatabaseSync): void {
       throw error;
     }
   }
+  backfillEventMemorySources(db);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS memory_usages (
@@ -631,6 +620,24 @@ function getRuleColumns(db: DatabaseSync): Set<string> {
       .all()
       .map((row) => String((row as { name: unknown }).name))
   );
+}
+
+function backfillEventMemorySources(db: DatabaseSync): void {
+  const columns = getRuleColumns(db);
+  if (!columns.has("source") || !columns.has("source_event_id")) return;
+  db.prepare(
+    `UPDATE rules
+     SET source = json_object(
+       'kind', 'event',
+       'sessionId', COALESCE(
+         (SELECT events.session_id FROM events WHERE events.id = rules.source_event_id),
+         'unknown'
+       ),
+       'eventId', source_event_id
+     )
+     WHERE source_event_id IS NOT NULL
+       AND source = '{"kind":"manual","author":"local-user"}'`
+  ).run();
 }
 
 function dedupeRules(rules: PlaybookRule[]): PlaybookRule[] {

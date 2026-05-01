@@ -632,6 +632,78 @@ describe("store", () => {
     });
   });
 
+  it("repairs v2 rows that still have manual provenance for extracted rules", () => {
+    const path = createTempDbPath();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        metadata TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT,
+        memory_type TEXT NOT NULL DEFAULT 'rule',
+        scope TEXT NOT NULL DEFAULT '{"type":"project","value":null}',
+        source TEXT NOT NULL DEFAULT '{"kind":"manual","author":"local-user"}',
+        confidence TEXT NOT NULL DEFAULT 'medium',
+        last_used_at TEXT,
+        superseded_by TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'local',
+        updated_at TEXT
+      );
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO schema_meta (key, value) VALUES ('schema_version', '2');
+      INSERT INTO sessions (id, project_id, title, created_at)
+      VALUES ('session_existing', 'demo', 'Existing session', '2026-01-01T00:00:00.000Z');
+      INSERT INTO events (id, session_id, category, title, body, metadata, created_at)
+      VALUES (
+        'event_existing', 'session_existing', 'codex_event', 'Codex response',
+        'Use pnpm.', '{}', '2026-01-01T00:00:01.000Z'
+      );
+      INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at,
+        memory_type, scope, source, confidence, last_used_at, superseded_by, sync_status, updated_at
+      ) VALUES (
+        'rule_existing', 'demo', 'approved', 'tooling', 'Use pnpm.', 'Learned from run.',
+        'event_existing', '2026-01-01T00:00:02.000Z', '2026-01-01T00:00:03.000Z',
+        'rule', '{"type":"project","value":null}', '{"kind":"manual","author":"local-user"}',
+        'medium', NULL, NULL, 'local', '2026-01-01T00:00:02.000Z'
+      );
+    `);
+    db.close();
+
+    const store = createStore(path);
+    const rule = store.getRule("rule_existing");
+
+    expect(rule?.source).toEqual({
+      kind: "event",
+      sessionId: "session_existing",
+      eventId: "event_existing"
+    });
+  });
+
   it("resumes a partially applied v2 migration without duplicate alter failures", () => {
     const path = createTempDbPath();
     const db = new DatabaseSync(path);
