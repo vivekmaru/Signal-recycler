@@ -11,6 +11,13 @@ type ClassifierCase = {
   expectRule: boolean;
 };
 
+export type RuleExtractionScore = {
+  truePositive: number;
+  falsePositive: number;
+  falseNegative: number;
+  status: "pass" | "fail";
+};
+
 export async function runClassifierEval(): Promise<EvalSuiteResult> {
   const cases: ClassifierCase[] = [
     {
@@ -54,26 +61,21 @@ export async function runClassifierEval(): Promise<EvalSuiteResult> {
         items: []
       });
       const rules = classification.candidateRules.map((rule) => rule.rule.toLowerCase());
-      const hasExpectedRule =
-        testCase.expectedRuleNeedles.length === 0 ||
-        rules.some((rule) =>
-          testCase.expectedRuleNeedles.every((needle) => rule.includes(needle.toLowerCase()))
-        );
-      const emittedRule = classification.candidateRules.length > 0;
-      if (testCase.expectRule && emittedRule && hasExpectedRule) truePositive += 1;
-      if (!testCase.expectRule && emittedRule) falsePositive += 1;
-      if (testCase.expectRule && (!emittedRule || !hasExpectedRule)) falseNegative += 1;
-      const status =
-        testCase.expectRule === emittedRule && (!testCase.expectRule || hasExpectedRule)
-          ? "pass"
-          : "fail";
+      const score = scoreRuleExtraction({
+        expectRule: testCase.expectRule,
+        expectedRuleNeedles: testCase.expectedRuleNeedles,
+        emittedRules: rules
+      });
+      truePositive += score.truePositive;
+      falsePositive += score.falsePositive;
+      falseNegative += score.falseNegative;
 
       results.push({
         id: `classifier.${testCase.id}`,
         title: testCase.title,
-        status,
+        status: score.status,
         summary:
-          status === "pass"
+          score.status === "pass"
             ? `rules=${classification.candidateRules.length}`
             : `expectedRule=${testCase.expectRule}, emitted=${classification.candidateRules.length}`,
         metrics: [metric("candidate_rules", classification.candidateRules.length, "rules")],
@@ -99,4 +101,28 @@ export async function runClassifierEval(): Promise<EvalSuiteResult> {
   } finally {
     if (originalKey !== undefined) process.env.OPENAI_API_KEY = originalKey;
   }
+}
+
+export function scoreRuleExtraction(input: {
+  expectRule: boolean;
+  expectedRuleNeedles: string[];
+  emittedRules: string[];
+}): RuleExtractionScore {
+  const emittedRule = input.emittedRules.length > 0;
+  const hasExpectedRule =
+    input.expectedRuleNeedles.length === 0 ||
+    input.emittedRules.some((rule) =>
+      input.expectedRuleNeedles.every((needle) => rule.includes(needle.toLowerCase()))
+    );
+  const matchedExpectedRule = input.expectRule && emittedRule && hasExpectedRule;
+  const unexpectedRuleEmission = emittedRule && (!input.expectRule || !hasExpectedRule);
+  const missingExpectedRule = input.expectRule && !hasExpectedRule;
+
+  return {
+    truePositive: matchedExpectedRule ? 1 : 0,
+    falsePositive: unexpectedRuleEmission ? 1 : 0,
+    falseNegative: missingExpectedRule ? 1 : 0,
+    status:
+      input.expectRule === emittedRule && (!input.expectRule || hasExpectedRule) ? "pass" : "fail"
+  };
 }

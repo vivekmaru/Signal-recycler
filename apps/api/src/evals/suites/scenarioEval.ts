@@ -14,19 +14,21 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
   const store = createStore(":memory:");
   const session = store.createSession({ projectId, title: "Package manager correction eval" });
 
-  const firstTurn = await processTurn({
-    store,
-    projectId,
-    sessionId: session.id,
-    prompt: "Validate fixtures/demo-repo by trying npm test first.",
-    codexRunner: {
-      run: async () => ({
-        finalResponse:
-          "The fixture rejected the run. It says: Use `pnpm test` instead of `npm test`.",
-        items: [{ type: "shell_call_output", output: "Use `pnpm test` instead of `npm test`." }]
-      })
-    }
-  });
+  const firstTurn = await withoutOpenAiKey(() =>
+    processTurn({
+      store,
+      projectId,
+      sessionId: session.id,
+      prompt: "Validate fixtures/demo-repo by trying npm test first.",
+      codexRunner: {
+        run: async () => ({
+          finalResponse:
+            "The fixture rejected the run. It says: Use `pnpm test` instead of `npm test`.",
+          items: [{ type: "shell_call_output", output: "Use `pnpm test` instead of `npm test`." }]
+        })
+      }
+    })
+  );
 
   const firstRule = firstTurn.candidateRules[0];
   if (firstRule) store.approveRule(firstRule.id);
@@ -84,4 +86,16 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
 function simulatePackageManagerAgent(prompt: string): { passed: boolean; command: "npm test" | "pnpm test" } {
   const command = /pnpm.+instead of.+npm|use pnpm/i.test(prompt) ? "pnpm test" : "npm test";
   return { command, passed: command === "pnpm test" };
+}
+
+async function withoutOpenAiKey<T>(callback: () => Promise<T>): Promise<T> {
+  const originalKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    return await callback();
+  } finally {
+    if (originalKey !== undefined) {
+      process.env.OPENAI_API_KEY = originalKey;
+    }
+  }
 }
