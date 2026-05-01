@@ -1,6 +1,7 @@
 import { type FastifyInstance } from "fastify";
 import { compressRequestBody } from "../compressor.js";
 import { injectIntoRequestBody } from "../playbook.js";
+import { recordMemoryInjection } from "../services/memoryInjection.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
 
@@ -56,6 +57,14 @@ export async function registerProxyRoutes(
     }
 
     const body = rawBody ? injectProxyBody(rawBody, rules) : undefined;
+    recordMemoryInjection({
+      store: options.store,
+      projectId: options.projectId,
+      sessionId,
+      adapter: "proxy",
+      memories: rules,
+      reason: "approved_project_memory"
+    });
     const finalSize = sizeOf(body);
     const finalItems = countInputItems(body);
 

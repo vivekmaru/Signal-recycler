@@ -1,5 +1,6 @@
 import { Codex } from "@openai/codex-sdk";
 import { injectPlaybookRules } from "./playbook.js";
+import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -34,6 +35,14 @@ export function createCodexRunner(input: {
 
       if (process.env.SIGNAL_RECYCLER_MOCK_CODEX === "1") {
         const injected = injectPlaybookRules(prompt, rules);
+        recordMemoryInjection({
+          store: input.store,
+          projectId: input.projectId,
+          sessionId,
+          adapter: "mock-codex",
+          memories: rules,
+          reason: "approved_project_memory"
+        });
         return {
           finalResponse:
             rules.length > 0

@@ -308,7 +308,7 @@ describe("api", () => {
     expect(response.json()).toEqual({ ok: true });
   });
 
-  it("records injection metadata on proxy requests", async () => {
+  it("records injection audit events and usage rows on proxy requests", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -344,9 +344,17 @@ describe("api", () => {
     expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
       injectedRules: 1
     });
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
+    expect(memoryEvent?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "proxy",
+      memoryIds: [manualRule.id]
+    });
+    expect(store.listMemoryUsages(manualRule.id)).toHaveLength(1);
+    expect(store.getRule(manualRule.id)?.lastUsedAt).not.toBeNull();
   });
 
-  it("does not emit standalone proxy injection events from the Codex runner", async () => {
+  it("records injection audit events and usage rows from the mock Codex runner", async () => {
     vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
     const store = createStore(":memory:");
     const rule = store.createRuleCandidate({
@@ -365,8 +373,16 @@ describe("api", () => {
 
     await runner.run({ sessionId: "codex-runner", prompt: "Apply the theme." });
     const events = store.listEvents("codex-runner");
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
 
-    expect(events.map((event) => event.category)).toEqual(["proxy_request"]);
+    expect(events.map((event) => event.category)).toEqual(["proxy_request", "memory_injection"]);
     expect(events[0]?.metadata).toMatchObject({ approvedRulesAvailable: 1 });
+    expect(memoryEvent?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "mock-codex",
+      memoryIds: [rule.id]
+    });
+    expect(store.listMemoryUsages(rule.id)).toHaveLength(1);
+    expect(store.getRule(rule.id)?.lastUsedAt).not.toBeNull();
   });
 });
