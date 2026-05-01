@@ -10,6 +10,7 @@ import {
 import { classifyTurn } from "./classifier.js";
 import { compressRequestBody } from "./compressor.js";
 import { injectIntoRequestBody } from "./playbook.js";
+import { processTurn } from "./services/turnProcessor.js";
 import { type SignalRecyclerStore } from "./store.js";
 
 export type CodexRunner = {
@@ -99,9 +100,14 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       metadata: { phase: "input" }
     });
 
-    let turn: Awaited<ReturnType<CodexRunner["run"]>>;
     try {
-      turn = await options.codexRunner.run({ sessionId: id, prompt: parsed.prompt });
+      return await processTurn({
+        store: options.store,
+        codexRunner: options.codexRunner,
+        projectId,
+        sessionId: id,
+        prompt: parsed.prompt
+      });
     } catch (error) {
       const message = (error as Error).message;
       options.store.createEvent({
@@ -114,68 +120,6 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       request.log.error({ err: error }, "Codex run failed");
       return reply.code(502).send({ error: "Codex run failed", message });
     }
-
-    const codexEvent = options.store.createEvent({
-      sessionId: id,
-      category: "codex_event",
-      title: "Codex response",
-      body: turn.finalResponse,
-      metadata: { items: turn.items.length }
-    });
-
-    const classification = await classifyTurn({
-      prompt: parsed.prompt,
-      finalResponse: turn.finalResponse,
-      items: turn.items
-    });
-    options.store.createEvent({
-      sessionId: id,
-      category: "classifier_result",
-      title: "Mark and distill complete",
-      body: `${classification.signal.length} signal, ${classification.noise.length} noise, ${classification.failure.length} failure`,
-      metadata: classification
-    });
-
-    const candidateRules = classification.candidateRules.map((candidate) => {
-      let rule = options.store.createRuleCandidate({
-        projectId,
-        category: candidate.category,
-        rule: candidate.rule,
-        reason: candidate.reason,
-        sourceEventId: codexEvent.id
-      });
-      options.store.createEvent({
-        sessionId: id,
-        category: "rule_candidate",
-        title: "Rule candidate created",
-        body: candidate.rule,
-        metadata: {
-          ruleId: rule.id,
-          reason: candidate.reason,
-          category: candidate.category,
-          confidence: candidate.confidence
-        }
-      });
-      // Auto-approve high-confidence rules — they're either pattern-extracted
-      // or explicitly marked unambiguous by the LLM classifier.
-      if (candidate.confidence === "high") {
-        rule = options.store.approveRule(rule.id);
-        options.store.createEvent({
-          sessionId: id,
-          category: "rule_auto_approved",
-          title: "Rule auto-approved",
-          body: candidate.rule,
-          metadata: {
-            ruleId: rule.id,
-            confidence: candidate.confidence,
-            category: candidate.category
-          }
-        });
-      }
-      return rule;
-    });
-
-    return { finalResponse: turn.finalResponse, candidateRules };
   });
 
   app.post("/api/demo/run", async (request, reply) => {
