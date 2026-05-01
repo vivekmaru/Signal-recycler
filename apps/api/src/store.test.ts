@@ -175,6 +175,67 @@ describe("store", () => {
     expect(store.getRule(otherProjectMemory.id)?.lastUsedAt).toBeNull();
   });
 
+  it("does not record memory usage for pending memory", () => {
+    const store = createStore(":memory:");
+    const pendingMemory = store.createRuleCandidate({
+      projectId: "demo",
+      category: "package-manager",
+      rule: "Use pnpm for package management.",
+      reason: "The workspace uses pnpm."
+    });
+
+    expect(() => store.recordMemoryUsage(memoryUsageInput(pendingMemory.id))).toThrow(
+      `Rule is not injectable: ${pendingMemory.id}`
+    );
+    expect(store.listMemoryUsages(pendingMemory.id)).toEqual([]);
+    expect(store.getRule(pendingMemory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not record memory usage for rejected memory", () => {
+    const store = createStore(":memory:");
+    const rejectedMemory = store.rejectRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+
+    expect(() => store.recordMemoryUsage(memoryUsageInput(rejectedMemory.id))).toThrow(
+      `Rule is not injectable: ${rejectedMemory.id}`
+    );
+    expect(store.listMemoryUsages(rejectedMemory.id)).toEqual([]);
+    expect(store.getRule(rejectedMemory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not record memory usage for superseded memory", () => {
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const newMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Corrected instruction."
+      }).id
+    );
+    store.supersedeRule(oldMemory.id, newMemory.id);
+
+    expect(() => store.recordMemoryUsage(memoryUsageInput(oldMemory.id))).toThrow(
+      `Rule is not injectable: ${oldMemory.id}`
+    );
+    expect(store.listMemoryUsages(oldMemory.id)).toEqual([]);
+    expect(store.getRule(oldMemory.id)?.lastUsedAt).toBeNull();
+  });
+
   it("supersedes approved memory so old memory is no longer injectable", () => {
     const store = createStore(":memory:");
     const oldMemory = store.approveRule(
@@ -198,6 +259,23 @@ describe("store", () => {
 
     expect(superseded.supersededBy).toBe(newMemory.id);
     expect(store.listApprovedRules("demo").map((r) => r.id)).toEqual([newMemory.id]);
+  });
+
+  it("does not supersede memory with itself", () => {
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Current instruction."
+      }).id
+    );
+
+    expect(() => store.supersedeRule(memory.id, memory.id)).toThrow(
+      `Rule cannot supersede itself: ${memory.id}`
+    );
+    expect(store.getRule(memory.id)?.supersededBy).toBeNull();
   });
 
   it("does not supersede memory with nonexistent replacement", () => {
@@ -420,4 +498,15 @@ describe("store", () => {
 
 function createTempDbPath(): string {
   return join(mkdtempSync(join(tmpdir(), "signal-recycler-store-")), "store.sqlite");
+}
+
+function memoryUsageInput(memoryId: string) {
+  return {
+    projectId: "demo",
+    memoryId,
+    sessionId: "session_1",
+    eventId: "event_1",
+    adapter: "proxy",
+    reason: "approved_project_memory"
+  };
 }

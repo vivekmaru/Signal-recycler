@@ -269,6 +269,10 @@ export function createStore(path: string) {
         .prepare("SELECT * FROM rules WHERE id = ? AND project_id = ?")
         .get(input.memoryId, input.projectId);
       if (!memoryRow) throw new Error(`Rule not found for project: ${input.memoryId}`);
+      const memory = mapRule(memoryRow);
+      if (memory.status !== "approved" || memory.supersededBy !== null) {
+        throw new Error(`Rule is not injectable: ${input.memoryId}`);
+      }
 
       const injectedAt = now();
       const usage: MemoryUsage = {
@@ -300,10 +304,12 @@ export function createStore(path: string) {
         );
         const result = db
           .prepare(
-            "UPDATE rules SET last_used_at = ?, updated_at = ? WHERE id = ? AND project_id = ?"
+            `UPDATE rules
+             SET last_used_at = ?, updated_at = ?
+             WHERE id = ? AND project_id = ? AND status = 'approved' AND superseded_by IS NULL`
           )
           .run(usage.injectedAt, usage.injectedAt, usage.memoryId, usage.projectId);
-        if (result.changes !== 1) throw new Error(`Rule not found for project: ${usage.memoryId}`);
+        if (result.changes !== 1) throw new Error(`Rule is not injectable: ${usage.memoryId}`);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -323,6 +329,7 @@ export function createStore(path: string) {
     },
 
     supersedeRule(id: string, replacementId: string): PlaybookRule {
+      if (id === replacementId) throw new Error(`Rule cannot supersede itself: ${id}`);
       const original = this.getRule(id);
       if (!original) throw new Error(`Rule not found: ${id}`);
       const replacement = this.getRule(replacementId);
