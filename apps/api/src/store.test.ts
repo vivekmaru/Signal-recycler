@@ -98,6 +98,65 @@ describe("store", () => {
     expect(rejected.updatedAt).toBe("2026-01-01T00:00:02.000Z");
   });
 
+  it("records memory usages and updates last used timestamp", () => {
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const event = store.createEvent({
+      sessionId: "session_1",
+      category: "memory_injection",
+      title: "Injected memory",
+      body: "Injected 1 memory.",
+      metadata: { projectId: "demo", memoryIds: [memory.id] }
+    });
+
+    const usage = store.recordMemoryUsage({
+      projectId: "demo",
+      memoryId: memory.id,
+      sessionId: "session_1",
+      eventId: event.id,
+      adapter: "proxy",
+      reason: "approved_project_memory"
+    });
+
+    const updated = store.getRule(memory.id);
+    expect(usage.memoryId).toBe(memory.id);
+    expect(usage.eventId).toBe(event.id);
+    expect(updated?.lastUsedAt).toBe(usage.injectedAt);
+    expect(store.listMemoryUsages(memory.id)).toEqual([usage]);
+  });
+
+  it("supersedes approved memory so old memory is no longer injectable", () => {
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const newMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Corrected instruction."
+      }).id
+    );
+
+    const superseded = store.supersedeRule(oldMemory.id, newMemory.id);
+
+    expect(superseded.supersededBy).toBe(newMemory.id);
+    expect(store.listApprovedRules("demo").map((r) => r.id)).toEqual([newMemory.id]);
+  });
+
   it("migrates existing v1 rule rows with memory defaults", () => {
     const path = createTempDbPath();
     const db = new DatabaseSync(path);

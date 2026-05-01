@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   type EventCategory,
   type MemoryConfidence,
+  type MemoryUsage,
   type MemoryScope,
   type MemorySource,
   type MemorySyncStatus,
@@ -41,6 +42,15 @@ type CreateEventInput = {
   title: string;
   body: string;
   metadata?: Record<string, unknown>;
+};
+
+type RecordMemoryUsageInput = {
+  projectId: string;
+  memoryId: string;
+  sessionId: string;
+  eventId: string;
+  adapter: string;
+  reason: string;
 };
 
 export type SignalRecyclerStore = ReturnType<typeof createStore>;
@@ -247,11 +257,64 @@ export function createStore(path: string) {
       return dedupeRules(
         db
         .prepare(
-          "SELECT * FROM rules WHERE project_id = ? AND status = 'approved' ORDER BY approved_at ASC"
+          "SELECT * FROM rules WHERE project_id = ? AND status = 'approved' AND superseded_by IS NULL ORDER BY approved_at ASC"
         )
         .all(projectId)
           .map(mapRule)
       );
+    },
+
+    recordMemoryUsage(input: RecordMemoryUsageInput): MemoryUsage {
+      const injectedAt = now();
+      const usage: MemoryUsage = {
+        id: createId("usage"),
+        projectId: input.projectId,
+        memoryId: input.memoryId,
+        sessionId: input.sessionId,
+        eventId: input.eventId,
+        adapter: input.adapter,
+        reason: input.reason,
+        injectedAt
+      };
+      db.prepare(
+        `INSERT INTO memory_usages (
+          id, project_id, memory_id, session_id, event_id, adapter, reason, injected_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        usage.id,
+        usage.projectId,
+        usage.memoryId,
+        usage.sessionId,
+        usage.eventId,
+        usage.adapter,
+        usage.reason,
+        usage.injectedAt
+      );
+      db.prepare("UPDATE rules SET last_used_at = ?, updated_at = ? WHERE id = ?").run(
+        usage.injectedAt,
+        usage.injectedAt,
+        usage.memoryId
+      );
+      return usage;
+    },
+
+    listMemoryUsages(memoryId: string): MemoryUsage[] {
+      return db
+        .prepare("SELECT * FROM memory_usages WHERE memory_id = ? ORDER BY injected_at DESC")
+        .all(memoryId)
+        .map(mapMemoryUsage);
+    },
+
+    supersedeRule(id: string, replacementId: string): PlaybookRule {
+      const updatedAt = now();
+      db.prepare("UPDATE rules SET superseded_by = ?, updated_at = ? WHERE id = ?").run(
+        replacementId,
+        updatedAt,
+        id
+      );
+      const rule = this.getRule(id);
+      if (!rule) throw new Error(`Rule not found: ${id}`);
+      return rule;
     },
 
     clearProjectMemory(projectId: string): { rulesDeleted: number; eventsDeleted: number; sessionsDeleted: number } {
@@ -495,5 +558,18 @@ function mapRule(row: Record<string, unknown>): PlaybookRule {
         : String(row.superseded_by),
     syncStatus: memorySyncStatusSchema.parse(row.sync_status ?? "local"),
     updatedAt: String(row.updated_at ?? row.created_at)
+  };
+}
+
+function mapMemoryUsage(row: Record<string, unknown>): MemoryUsage {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    memoryId: String(row.memory_id),
+    sessionId: String(row.session_id),
+    eventId: String(row.event_id),
+    adapter: String(row.adapter),
+    reason: String(row.reason),
+    injectedAt: String(row.injected_at)
   };
 }
