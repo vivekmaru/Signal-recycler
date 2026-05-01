@@ -35,14 +35,18 @@ export function createCodexRunner(input: {
 
       if (process.env.SIGNAL_RECYCLER_MOCK_CODEX === "1") {
         const injected = injectPlaybookRules(prompt, rules);
-        recordMemoryInjection({
-          store: input.store,
-          projectId: input.projectId,
-          sessionId,
-          adapter: "mock-codex",
-          memories: rules,
-          reason: "approved_project_memory"
-        });
+        try {
+          recordMemoryInjection({
+            store: input.store,
+            projectId: input.projectId,
+            sessionId,
+            adapter: "mock-codex",
+            memories: rules,
+            reason: "approved_project_memory"
+          });
+        } catch (error) {
+          console.warn("[signal-recycler] Mock Codex memory audit failed", error);
+        }
         return {
           finalResponse:
             rules.length > 0

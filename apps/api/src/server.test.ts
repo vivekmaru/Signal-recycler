@@ -855,4 +855,41 @@ describe("api", () => {
     expect(store.listMemoryUsages(rule.id)).toHaveLength(1);
     expect(store.getRule(rule.id)?.lastUsedAt).not.toBeNull();
   });
+
+  it("does not fail mock Codex runs when memory audit persistence fails", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const store = createStore(":memory:");
+      const rule = store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use the approved theme tokens.",
+        reason: "Manual demo rule."
+      });
+      store.approveRule(rule.id);
+      const runner = createCodexRunner({
+        store: {
+          ...store,
+          recordMemoryInjectionEvent: () => {
+            throw new Error("audit unavailable");
+          }
+        },
+        apiPort: 3001,
+        projectId: TEST_APP_OPTIONS.projectId,
+        workingDirectory: TEST_APP_OPTIONS.workingDirectory
+      });
+
+      const result = await runner.run({ sessionId: "codex-audit-fail", prompt: "Apply the theme." });
+
+      expect(result.finalResponse).toContain("Checking learned constraints from playbook");
+      expect(store.listMemoryUsages(rule.id)).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(
+        "[signal-recycler] Mock Codex memory audit failed",
+        expect.any(Error)
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

@@ -132,7 +132,7 @@ export function createStore(path: string) {
     },
 
     listSessions(projectId?: string): SessionRecord[] {
-      if (projectId) {
+      if (projectId !== undefined) {
         return db
           .prepare("SELECT * FROM sessions WHERE project_id = ? ORDER BY created_at DESC")
           .all(projectId)

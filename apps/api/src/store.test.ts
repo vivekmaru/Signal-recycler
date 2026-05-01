@@ -53,6 +53,14 @@ describe("store", () => {
     );
   });
 
+  it("treats empty project IDs as scoped when listing sessions", () => {
+    const store = createStore(":memory:");
+    const emptyProjectSession = store.createSession({ projectId: "", title: "Empty project" });
+    store.createSession({ projectId: "demo", title: "Demo project" });
+
+    expect(store.listSessions("").map((session) => session.id)).toEqual([emptyProjectSession.id]);
+  });
+
   it("migrates rule rows into memory records with provenance defaults", () => {
     const store = createStore(":memory:");
 
