@@ -1,6 +1,6 @@
 import { compressHistory } from "../../compressor.js";
 import { metric, suiteResult } from "../report.js";
-import { type EvalSuiteResult } from "../types.js";
+import { type EvalCaseResult, type EvalSuiteResult } from "../types.js";
 
 type CompressionCase = {
   id: string;
@@ -36,7 +36,7 @@ export function runCompressorEval(): EvalSuiteResult {
     }
   ];
 
-  const results = cases.map((testCase) => {
+  const results: EvalCaseResult[] = cases.map((testCase) => {
     const beforeChars = testCase.output.length;
     const result = compressHistory([{ type: "shell_call_output", output: testCase.output }]);
     const compressedOutput = String((result.items[0] as { output: string }).output);
@@ -66,12 +66,12 @@ export function runCompressorEval(): EvalSuiteResult {
         retainedNeedles: testCase.retainedNeedles,
         charsRemoved: result.charsRemoved
       }
-    } as const;
+    };
   });
 
   const totalTokensSaved = results.reduce(
     (sum, testCase) =>
-      sum + Number(testCase.metrics.find((item) => item.name === "tokens_saved")?.value ?? 0),
+      sum + Number(testCase.metrics?.find((item) => item.name === "tokens_saved")?.value ?? 0),
     0
   );
 

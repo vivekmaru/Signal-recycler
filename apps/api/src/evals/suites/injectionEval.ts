@@ -1,6 +1,6 @@
 import { injectIntoRequestBody } from "../../playbook.js";
 import { metric, suiteResult } from "../report.js";
-import { type EvalSuiteResult } from "../types.js";
+import { type EvalCaseResult, type EvalSuiteResult } from "../types.js";
 
 const rule = {
   id: "rule_eval",
@@ -8,8 +8,14 @@ const rule = {
   rule: "Use pnpm instead of npm in fixtures/demo-repo."
 };
 
+type InjectionCase = {
+  id: string;
+  title: string;
+  run: () => unknown;
+};
+
 export function runInjectionEval(): EvalSuiteResult {
-  const cases = [
+  const inputs: InjectionCase[] = [
     {
       id: "responses-input-string",
       title: "Injects into Responses API input string",
@@ -32,7 +38,9 @@ export function runInjectionEval(): EvalSuiteResult {
           [rule]
         )
     }
-  ].map((testCase) => {
+  ];
+
+  const cases: EvalCaseResult[] = inputs.map((testCase) => {
     const body = testCase.run();
     const serialized = JSON.stringify(body);
     const occurrences = serialized.match(/Signal Recycler Playbook/g)?.length ?? 0;
@@ -44,7 +52,7 @@ export function runInjectionEval(): EvalSuiteResult {
       summary: `playbookOccurrences=${occurrences}`,
       metrics: [metric("playbook_occurrences", occurrences, "blocks")],
       details: { body }
-    } as const;
+    };
   });
 
   return suiteResult({

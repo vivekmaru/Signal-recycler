@@ -1,6 +1,6 @@
 import { classifyTurn } from "../../classifier.js";
 import { metric, suiteResult } from "../report.js";
-import { type EvalSuiteResult } from "../types.js";
+import { type EvalCaseResult, type EvalSuiteResult } from "../types.js";
 
 type ClassifierCase = {
   id: string;
@@ -46,7 +46,7 @@ export async function runClassifierEval(): Promise<EvalSuiteResult> {
     let falsePositive = 0;
     let falseNegative = 0;
 
-    const results = [];
+    const results: EvalCaseResult[] = [];
     for (const testCase of cases) {
       const classification = await classifyTurn({
         prompt: testCase.prompt,
@@ -78,7 +78,7 @@ export async function runClassifierEval(): Promise<EvalSuiteResult> {
             : `expectedRule=${testCase.expectRule}, emitted=${classification.candidateRules.length}`,
         metrics: [metric("candidate_rules", classification.candidateRules.length, "rules")],
         details: { classification }
-      } as const);
+      });
     }
 
     const precision =

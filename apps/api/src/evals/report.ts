@@ -98,7 +98,7 @@ export function suiteResult(input: {
     id: input.id,
     title: input.title,
     cases: input.cases,
-    metrics: input.metrics,
+    ...(input.metrics ? { metrics: input.metrics } : {}),
     status: aggregateStatus(input.cases.map((testCase) => testCase.status))
   };
 }
