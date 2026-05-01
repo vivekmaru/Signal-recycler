@@ -17,6 +17,9 @@ Signal Recycler remains the runtime source of truth for memory. `AGENTS.md` and 
 - Keep changes scoped to the current task.
 - Prefer existing repo patterns over new abstractions.
 - Do not claim retrieval, context indexing, cloud sync, or owned-session behavior exists unless it is implemented and verified.
+- For phase work, treat the explicit phase heading and success criteria in `docs/validation-roadmap.md` as the binding scope. Long-term product direction can inform design, but it must not rename, expand, or reorder the current phase without user approval.
+- Name phase branches from the explicit phase title, not from future-phase architecture terms. Example: Phase 3 "Retrieval Before More Memory Creation" should use a retrieval-focused branch name, not an owned-session or context-envelope branch name.
+- Before writing a phase spec or implementation plan, include a short "scope anchor" that quotes or paraphrases the roadmap phase goal, success criteria, and explicit out-of-scope next-phase items.
 - Preserve local-first behavior by default.
 - Treat memory provenance and project isolation as correctness requirements, not polish.
 - When a review surfaces a residual risk, either fix it in the branch or record it in the follow-up backlog with enough detail to be actionable.
@@ -51,4 +54,3 @@ The follow-up backlog must include:
 - Concrete next action for each item.
 
 Do not use the backlog to hide a correctness bug that should block the current PR.
-
