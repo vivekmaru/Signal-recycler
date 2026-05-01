@@ -19,6 +19,14 @@ async function request(path, options = {}) {
   return contentType.includes("application/json") ? response.json() : response.text();
 }
 
+const config = await request("/api/config");
+if (!process.env.SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB && !config.database?.isSmoke) {
+  const databaseName = config.database?.basename ?? "unknown database";
+  throw new Error(
+    `Refusing to run smoke demo against ${databaseName}. Start the API with SIGNAL_RECYCLER_DB pointing at a temporary smoke database, or set SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB=1.`
+  );
+}
+
 const session = await request("/api/sessions", {
   method: "POST",
   body: JSON.stringify({ title: "CLI smoke demo" })
@@ -57,7 +65,7 @@ console.log(
       approvedRule: firstRule.rule,
       phase2Response: secondRun.finalResponse,
       eventCategories: events.map((event) => event.category),
-      hasProxyInjection: events.some((event) => event.category === "proxy_injection"),
+      proxyRequests: events.filter((event) => event.category === "proxy_request").length,
       playbook
     },
     null,

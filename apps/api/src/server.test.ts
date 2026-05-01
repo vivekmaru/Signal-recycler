@@ -36,6 +36,59 @@ describe("api", () => {
     });
   });
 
+  it("returns smoke database metadata in config", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      databasePath: "/tmp/signal-recycler-smoke.sqlite",
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/config" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      database: {
+        basename: "signal-recycler-smoke.sqlite",
+        isSmoke: true
+      }
+    });
+  });
+
+  it("returns recent events through the firehose endpoint", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Firehose"
+    });
+    store.createEvent({
+      sessionId: session.id,
+      category: "codex_event",
+      title: "Tracked event",
+      body: "Visible in dashboard firehose"
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=10" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        sessionId: session.id,
+        category: "codex_event",
+        title: "Tracked event"
+      })
+    ]);
+  });
+
   it("creates rule candidates during a run and emits ordered events", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
@@ -150,7 +203,7 @@ describe("api", () => {
     expect(response.json()).toEqual({ ok: true });
   });
 
-  it("records injection metadata on proxy requests without a standalone proxy injection event", async () => {
+  it("records injection metadata on proxy requests", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -183,7 +236,6 @@ describe("api", () => {
     const events = store.listEvents("proxy");
 
     expect(response.statusCode).toBe(200);
-    expect(events.map((event) => event.category)).not.toContain("proxy_injection");
     expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
       injectedRules: 1
     });

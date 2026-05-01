@@ -4,6 +4,10 @@ export type ApiConfig = {
   projectId: string;
   workingDirectory: string;
   workingDirectoryBasename: string;
+  database: {
+    basename: string | null;
+    isSmoke: boolean;
+  };
 };
 
 export async function fetchConfig(): Promise<ApiConfig> {
