@@ -92,12 +92,13 @@ Dashboard playbook
 
 Signal Recycler stores durable memories locally in SQLite. A memory records:
 
-- type: rule, preference, project fact, command convention, source-derived, or synced file
-- scope: project, repo path, package, file, agent, or user
-- source: manual user entry, agent event, synced instruction file, import, or source chunk
-- confidence: high, medium, or low
-- sync status: local, imported, exported, or synced
-- audit usage: every injection records the session, adapter, event, and timestamp
+- type: `rule`, `preference`, `project_fact`, `command_convention`, `source_derived`, or `synced_file`
+- scope type: `project`, `repo_path`, `package`, `file`, `agent`, or `user`
+- source kind: `manual`, `event`, `synced_file`, `import`, or `source_chunk`
+- confidence: `high`, `medium`, or `low`
+- sync status: `local`, `imported`, `exported`, or `synced`
+
+Memory usage audit rows are stored separately from memory records. Every injection records the memory, session, adapter, event, reason, and timestamp.
 
 `AGENTS.md` and `CLAUDE.md` are compatibility/export surfaces. Signal Recycler remains the runtime source of truth.
 
@@ -231,6 +232,31 @@ The dashboard is the main product surface:
 - `POST /api/memories`: create and approve a manual memory.
 - `POST /api/memories/synced`: import a memory from an `AGENTS.md` or `CLAUDE.md` compatibility block.
 - `GET /api/memories/:id/audit`: return the memory plus usage rows showing where it was injected.
+
+Manual memory request:
+
+```json
+{
+  "category": "tooling",
+  "rule": "Use pnpm for package management in this repository.",
+  "reason": "The workspace lockfile and scripts are managed with pnpm.",
+  "memoryType": "command_convention",
+  "scope": { "type": "project", "value": null }
+}
+```
+
+Synced compatibility-block import request:
+
+```json
+{
+  "category": "agent-instructions",
+  "rule": "Run pnpm type-check before reporting TypeScript changes as complete.",
+  "reason": "The AGENTS.md compatibility block records this project convention.",
+  "path": "AGENTS.md",
+  "section": "signal-recycler",
+  "scope": { "type": "repo_path", "value": "apps/api" }
+}
+```
 
 Legacy `/api/rules` endpoints remain available during the transition from playbook rules to general memories.
 
