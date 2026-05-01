@@ -295,7 +295,7 @@ Implementation plan: `docs/superpowers/plans/2026-05-01-phase-1-isolated-product
 Success criteria:
 
 - `pnpm eval` runs local deterministic evals without OpenAI calls.
-- `pnpm eval:live` runs optional adapter-backed scenarios through explicitly configured local agent CLIs.
+- `pnpm eval:live` runs optional adapter-backed scenarios through `SIGNAL_RECYCLER_LIVE_AGENT=codex|claude`.
 - Reports include success delta, token delta, latency, rule precision, and stale-memory failures.
 - At least one fixture proves correctness improvement from injected memory, not just cost reduction.
 

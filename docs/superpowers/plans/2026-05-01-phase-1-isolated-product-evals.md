@@ -4,7 +4,7 @@
 
 **Goal:** Add isolated evals that prove and measure Signal Recycler's current product claims before building broader memory, retrieval, or owned-session infrastructure.
 
-**Architecture:** Add a small TypeScript eval runner inside the API package because current product logic lives there. Local evals must run without OpenAI calls and without mutating the developer's normal SQLite database. Optional live evals are adapter-backed and should use a local agent CLI command when configured; they must not make `OPENAI_API_KEY` the default live-eval requirement.
+**Architecture:** Add a small TypeScript eval runner inside the API package because current product logic lives there. Local evals must run without OpenAI calls and without mutating the developer's normal SQLite database. Optional live evals are adapter-backed and select a supported local agent with `SIGNAL_RECYCLER_LIVE_AGENT=codex|claude`; they must not make `OPENAI_API_KEY` the default live-eval requirement.
 
 **Tech Stack:** TypeScript, pnpm workspaces, Vitest, Fastify app injection, SQLite `:memory:`, existing compressor/classifier/playbook/process-turn modules.
 
@@ -44,7 +44,7 @@ Create:
 - `apps/api/src/evals/suites/injectionEval.ts`: playbook injection placement and dedupe evals.
 - `apps/api/src/evals/suites/isolationEval.ts`: project/session isolation evals against in-memory SQLite.
 - `apps/api/src/evals/suites/scenarioEval.ts`: with-memory versus without-memory outcome eval over `fixtures/demo-repo`.
-- `apps/api/src/evals/suites/liveEval.ts`: optional local-agent CLI smoke eval that skips unless an explicit command is configured.
+- `apps/api/src/evals/suites/liveEval.ts`: optional local-agent CLI smoke eval that skips unless `SIGNAL_RECYCLER_LIVE_AGENT` selects a supported adapter.
 - `apps/api/src/evals/report.test.ts`: report rendering tests.
 - `apps/api/src/evals/suites/scenarioEval.test.ts`: product outcome regression test.
 
@@ -916,64 +916,70 @@ import { metric, suiteResult } from "../report.js";
 import { type EvalSuiteResult } from "../types.js";
 
 const execFileAsync = promisify(execFile);
+const LIVE_EVAL_SENTINEL = "SIGNAL_RECYCLER_LIVE_EVAL_PASS";
+
+type AgentAdapter = {
+  command: string;
+  args: string[];
+  extractFinalText(result: { stdout: string; stderr: string }): string;
+};
 
 export async function runLiveEval(): Promise<EvalSuiteResult> {
-  const commandConfig = process.env.SIGNAL_RECYCLER_LIVE_AGENT_COMMAND;
-  if (!commandConfig) {
+  const selectedAgent = process.env.SIGNAL_RECYCLER_LIVE_AGENT;
+  if (!selectedAgent) {
     return suiteResult({
       id: "live",
       title: "Live Agent Adapter Evals",
       cases: [
         {
-          id: "live.agent-command",
-          title: "Live agent eval skipped without configured CLI",
+          id: "live.agent-selection",
+          title: "Live agent eval skipped without selected adapter",
           status: "skip",
           summary:
-            "SIGNAL_RECYCLER_LIVE_AGENT_COMMAND is not set. Example: '[\"codex\",\"exec\",\"--json\"]' or '[\"claude\",\"-p\"]'."
+            "SIGNAL_RECYCLER_LIVE_AGENT is not set. Supported values: codex, claude."
         }
       ],
       metrics: [metric("live_eval_cases_run", 0, "cases")]
     });
   }
 
-  const parsed = parseCommand(commandConfig);
-  if (!parsed.ok) {
+  const adapter = resolveAgentAdapter(selectedAgent);
+  if (!adapter) {
     return suiteResult({
       id: "live",
       title: "Live Agent Adapter Evals",
       cases: [
         {
-          id: "live.agent-command-parse",
-          title: "Live agent command config is valid JSON",
+          id: "live.agent-selection",
+          title: "Live agent selection is supported",
           status: "fail",
-          summary: parsed.error
+          summary: `Unsupported live agent "${selectedAgent}". Supported values: codex, claude.`
         }
       ],
       metrics: [metric("live_eval_cases_run", 0, "cases")]
     });
   }
 
-  const [command, ...args] = parsed.command;
   const prompt = injectPlaybookRules(
-    "Do not run shell commands or modify files. Reply with exactly: SIGNAL_RECYCLER_LIVE_EVAL_PASS",
+    `Do not run shell commands or modify files. Reply with exactly: ${LIVE_EVAL_SENTINEL}`,
     [
       {
         id: "live_eval_rule",
         category: "eval",
-        rule: "For this eval only, the correct response is SIGNAL_RECYCLER_LIVE_EVAL_PASS."
+        rule: `For this eval only, the correct response is ${LIVE_EVAL_SENTINEL}.`
       }
     ]
   );
   const started = performance.now();
 
   try {
-    const result = await execFileAsync(command, [...args, prompt], {
+    const result = await execFileAsync(adapter.command, [...adapter.args, prompt], {
       timeout: Number(process.env.SIGNAL_RECYCLER_LIVE_AGENT_TIMEOUT_MS ?? 120000),
       cwd: process.cwd(),
       maxBuffer: 1024 * 1024
     });
-    const output = `${result.stdout}\n${result.stderr}`;
-    const matched = output.includes("SIGNAL_RECYCLER_LIVE_EVAL_PASS");
+    const finalText = adapter.extractFinalText(result);
+    const matched = finalText.includes(LIVE_EVAL_SENTINEL);
 
     return suiteResult({
       id: "live",
@@ -984,15 +990,17 @@ export async function runLiveEval(): Promise<EvalSuiteResult> {
           title: "Configured agent CLI receives injected memory",
           status: matched ? "pass" : "fail",
           summary: matched
-            ? "Agent response contained the injected eval sentinel."
-            : "Agent response did not contain the injected eval sentinel.",
+            ? "Agent final response contained the injected eval sentinel."
+            : "Agent final response did not contain the injected eval sentinel.",
           metrics: [
             metric("live_eval_cases_run", 1, "cases"),
             metric("live_agent_latency_ms", Math.round(performance.now() - started), "ms")
           ],
           details: {
-            command,
-            args,
+            agent: selectedAgent,
+            command: adapter.command,
+            args: adapter.args,
+            finalText: finalText.slice(0, 4000),
             stdout: result.stdout.slice(0, 4000),
             stderr: result.stderr.slice(0, 4000)
           }
@@ -1018,26 +1026,59 @@ export async function runLiveEval(): Promise<EvalSuiteResult> {
   }
 }
 
-function parseCommand(value: string):
-  | { ok: true; command: [string, ...string[]] }
-  | { ok: false; error: string } {
-  try {
-    const parsed = JSON.parse(value);
-    if (
-      !Array.isArray(parsed) ||
-      parsed.length === 0 ||
-      !parsed.every((item) => typeof item === "string")
-    ) {
-      return { ok: false, error: "SIGNAL_RECYCLER_LIVE_AGENT_COMMAND must be a JSON string array." };
-    }
-    return { ok: true, command: parsed as [string, ...string[]] };
-  } catch (error) {
-    return { ok: false, error: `Invalid SIGNAL_RECYCLER_LIVE_AGENT_COMMAND: ${(error as Error).message}` };
+function resolveAgentAdapter(agent: string):
+  | AgentAdapter
+  | null {
+  if (agent === "codex") {
+    return {
+      command: "codex",
+      args: ["exec", "--json"],
+      extractFinalText: ({ stdout }) => extractCodexJsonlFinalText(stdout)
+    };
   }
+  if (agent === "claude") {
+    return {
+      command: "claude",
+      args: ["-p"],
+      extractFinalText: ({ stdout }) => stdout
+    };
+  }
+  return null;
+}
+
+function extractCodexJsonlFinalText(stdout: string): string {
+  const texts: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>;
+      const type = String(event.type ?? event.event ?? event.kind ?? "");
+      if (/user|prompt|input/i.test(type)) continue;
+      if (/assistant|message|final|response|completed/i.test(type)) {
+        const text = extractLikelyText(event);
+        if (text) texts.push(text);
+      }
+    } catch {
+      // Non-JSON output is ignored for Codex JSONL mode so prompt echoes do not create false passes.
+    }
+  }
+  return texts.join("\n");
+}
+
+function extractLikelyText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(extractLikelyText).filter(Boolean).join("\n");
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  const direct = ["text", "content", "message", "finalResponse", "output_text"]
+    .map((key) => extractLikelyText(record[key]))
+    .filter(Boolean);
+  return direct.join("\n");
 }
 ```
 
-- [ ] **Step 2: Run live eval without configured CLI**
+- [ ] **Step 2: Run live eval without selected adapter**
 
 Run:
 
@@ -1047,21 +1088,21 @@ pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './s
 
 Expected: suite status is `"skip"` and no agent process is spawned.
 
-- [ ] **Step 3: Run live eval with an explicitly configured local CLI**
+- [ ] **Step 3: Run live eval with an explicitly selected local adapter**
 
 If Codex CLI is authenticated locally, run:
 
 ```bash
-SIGNAL_RECYCLER_LIVE_AGENT_COMMAND='["codex","exec","--json"]' pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
+SIGNAL_RECYCLER_LIVE_AGENT=codex pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
 ```
 
 If Claude Code is authenticated locally, run:
 
 ```bash
-SIGNAL_RECYCLER_LIVE_AGENT_COMMAND='["claude","-p"]' pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
+SIGNAL_RECYCLER_LIVE_AGENT=claude pnpm --filter @signal-recycler/api exec tsx -e "import { runLiveEval } from './src/evals/suites/liveEval.ts'; console.log(JSON.stringify(await runLiveEval(), null, 2));"
 ```
 
-Expected when the selected CLI is installed and authenticated: suite status is `"pass"` and the output contains `SIGNAL_RECYCLER_LIVE_EVAL_PASS`.
+Expected when the selected CLI is installed and authenticated: suite status is `"pass"` and the parsed final response contains `SIGNAL_RECYCLER_LIVE_EVAL_PASS`.
 
 - [ ] **Step 4: Commit**
 
@@ -1156,7 +1197,7 @@ rg -n "task_success_delta|tokens_saved_by_compression|candidate_rule_precision|s
 
 Expected: all five metric names are present.
 
-- [ ] **Step 4: Run live eval command without configured CLI**
+- [ ] **Step 4: Run live eval command without selected adapter**
 
 Run:
 
@@ -1164,7 +1205,7 @@ Run:
 pnpm eval:live
 ```
 
-Expected: command exits `0`, report status is `warn` or `skip` depending on local suites, and the live suite says `SIGNAL_RECYCLER_LIVE_AGENT_COMMAND is not set`.
+Expected: command exits `0`, overall report status is `warn` because the local stale-memory exposure case is a known warning, and the live suite says `SIGNAL_RECYCLER_LIVE_AGENT is not set`.
 
 - [ ] **Step 5: Commit**
 
@@ -1210,10 +1251,11 @@ Optional live agent-backed evals are separate:
 pnpm eval:live
 ```
 
-By default, the live suite reports `skip`. To run it against an authenticated local CLI, set `SIGNAL_RECYCLER_LIVE_AGENT_COMMAND` to a JSON array command, for example:
+By default, the live suite reports `skip`. To run it against an authenticated local CLI, set `SIGNAL_RECYCLER_LIVE_AGENT` to a supported adapter:
 
 ```bash
-SIGNAL_RECYCLER_LIVE_AGENT_COMMAND='["codex","exec","--json"]' pnpm eval:live
+SIGNAL_RECYCLER_LIVE_AGENT=codex pnpm eval:live
+SIGNAL_RECYCLER_LIVE_AGENT=claude pnpm eval:live
 ```
 
 The live eval path is intentionally agent-adapter oriented. `OPENAI_API_KEY` is not required for the default Phase 1 live eval.
@@ -1256,7 +1298,7 @@ pnpm eval
 
 Expected: exits `0`, prints generated report paths, and produces `.signal-recycler/evals/latest.json` plus `.signal-recycler/evals/latest.md`.
 
-- [ ] **Step 2: Run optional live eval without configured CLI**
+- [ ] **Step 2: Run optional live eval without selected adapter**
 
 Run:
 
@@ -1332,3 +1374,4 @@ Plan constraints:
 - Normal developer SQLite state is not mutated.
 - Runtime product behavior is not changed.
 - Known stale-memory weakness is measured as `warn`, not hidden and not promoted to a Phase 1 runtime fix.
+- Live adapter evals check parsed final agent text, not raw process output, so a prompt echo in JSONL output cannot create a false pass.
