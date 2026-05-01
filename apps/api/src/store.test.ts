@@ -27,4 +27,19 @@ describe("store", () => {
     expect(markdown).toContain("Use pnpm for package operations.");
     expect(markdown).not.toContain("Keep UI copy terse.");
   });
+
+  it("initializes schema metadata and query indexes", () => {
+    const store = createStore(":memory:");
+    const internals = store.inspectSchema();
+
+    expect(internals.schemaVersion).toBe(1);
+    expect(internals.indexes).toEqual(
+      expect.arrayContaining([
+        "idx_sessions_project_created",
+        "idx_events_session_created",
+        "idx_rules_project_status_created",
+        "idx_rules_project_status_approved"
+      ])
+    );
+  });
 });

@@ -60,6 +60,25 @@ export function createStore(path: string) {
       created_at TEXT NOT NULL,
       approved_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS schema_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1');
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_project_created
+      ON sessions (project_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_events_session_created
+      ON events (session_id, created_at ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_rules_project_status_created
+      ON rules (project_id, status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_rules_project_status_approved
+      ON rules (project_id, status, approved_at ASC);
   `);
 
   return {
@@ -210,8 +229,11 @@ export function createStore(path: string) {
         const r = db.prepare("DELETE FROM events WHERE session_id = ?").run(row.id);
         eventsDeleted += Number(r.changes);
       }
-      // Also delete the floating "proxy" bucket events (CLI traffic)
-      const proxyEvents = db.prepare("DELETE FROM events WHERE session_id = 'proxy'").run();
+      const proxyEvents = db
+        .prepare(
+          "DELETE FROM events WHERE session_id = 'proxy' AND json_extract(metadata, '$.projectId') = ?"
+        )
+        .run(projectId);
       eventsDeleted += Number(proxyEvents.changes);
       const sessionsResult = db
         .prepare("DELETE FROM sessions WHERE project_id = ?")
@@ -240,6 +262,23 @@ export function createStore(path: string) {
         }
       }
       return lines.join("\n");
+    },
+
+    inspectSchema(): { schemaVersion: number; indexes: string[] } {
+      const versionRow = db
+        .prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+        .get() as { value?: string } | undefined;
+      const indexes = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name ASC"
+        )
+        .all()
+        .map((row) => String((row as { name: unknown }).name));
+
+      return {
+        schemaVersion: Number(versionRow?.value ?? 0),
+        indexes
+      };
     }
   };
 }
