@@ -1,22 +1,36 @@
 # Signal Recycler
 
-**A Codex memory proxy that compresses noisy context and injects durable project rules into every future Codex turn.**
+**A local-first memory runtime for coding agents, with an existing v1 OpenAI-compatible proxy for Codex traffic.**
 
-Signal Recycler turns Codex from a fresh assistant on every run into a project-aware operator. It sits between Codex and the OpenAI API, removes context noise, records what happened, extracts useful rules from failures, and lets developers add proactive rules before Codex starts work.
+Signal Recycler is moving toward Signal Recycler-owned agent sessions: it stores the observable context around a run, retrieves relevant memory, injects scoped project guidance, streams/audits events, and learns durable memories after the run.
 
-The result is simple: a vague future prompt can behave precisely because Signal Recycler carries the project's memory forward.
+The current v1 implementation is narrower: it provides a local OpenAI-compatible proxy for Codex traffic, compresses selected noisy request items, records telemetry, extracts reusable playbook rules from dashboard runs, and injects approved rules into later proxied requests.
 
 ## Why this matters
 
 Long agentic coding sessions rot. The useful facts are surrounded by stack traces, failed attempts, old logs, and repeated corrections. Codex can technically see the history, but the signal-to-noise ratio gets worse as the session grows.
 
-Signal Recycler fixes that with a local memory layer:
+Signal Recycler is designed to fix that with a local memory layer:
 
-- **Compress noise**: trims large shell outputs, stack traces, and error dumps before they are forwarded.
+- **Compress selected noise**: trims large shell outputs, stack traces, and error dumps before they are forwarded.
 - **Learn from failures**: classifies completed turns and extracts reusable rule candidates.
 - **Accept proactive rules**: lets you manually add constraints before running Codex.
-- **Inject memory**: prepends approved playbook rules into every future Codex request.
+- **Inject memory**: prepends approved playbook rules into future requests routed through Signal Recycler.
 - **Show the proof**: the dashboard displays proxy traffic, compression, token savings, injected rules, and the live playbook.
+
+## Supported run modes
+
+### Forward path: Signal Recycler-owned sessions
+
+This is the product direction. Signal Recycler should own the session envelope around agent runs: retrieve memory, compress or omit low-value context, inject scoped memory, run an agent adapter, stream events to the dashboard, and learn asynchronously after the run.
+
+This mode is not fully implemented yet. It is the next major direction after Phase 0 cleanup.
+
+### Existing v1: API-compatible proxy adapter
+
+The current app supports an OpenAI-compatible proxy at `/proxy/*`. The proxy can compress selected noisy request items, inject approved playbook rules, forward the transformed request upstream, and record request telemetry.
+
+Proxy mode remains useful for API-compatible agents and custom apps, but it is the existing v1 adapter rather than the main forward roadmap.
 
 ## Hackathon demo
 
@@ -46,12 +60,12 @@ Example proactive-memory demo:
 
 3. Signal Recycler injects the rule into the Codex request, so Codex follows the linked theme source even though the prompt itself stays intentionally vague.
 
-That is the core product claim: **Codex plus durable project memory can execute intent that a stateless Codex run would have to guess.**
+That is the current product claim: **Codex plus durable project memory can execute intent that a stateless Codex run would have to guess when the request is routed through Signal Recycler.**
 
 ## How it works
 
 ```text
-Prompt from dashboard or Codex CLI
+Prompt from dashboard or API-compatible client
     |
     v
 Signal Recycler proxy
@@ -118,12 +132,12 @@ http://127.0.0.1:3001
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `OPENAI_API_KEY` | Yes | - | Project API key used by the proxy when forwarding requests to OpenAI. |
+| `OPENAI_API_KEY` | Required for live proxy/dashboard Codex runs | - | Project API key used by the proxy when forwarding requests upstream and by the optional classifier. Mock mode can run without it. |
 | `PORT` | No | `3001` | API server port. |
 | `SIGNAL_RECYCLER_DB` | No | `./signal-recycler.sqlite` | SQLite database path. |
 | `SIGNAL_RECYCLER_WORKDIR` | No | repo root | Directory Codex operates in. |
 | `SIGNAL_RECYCLER_PROJECT_ID` | No | basename of workdir | Namespace for rules, sessions, and events. |
-| `SIGNAL_RECYCLER_CLASSIFIER_MODEL` | No | `gpt-5.4-mini` | Model used to classify turns and extract rule candidates. |
+| `SIGNAL_RECYCLER_CLASSIFIER_MODEL` | No | `gpt-5.1-mini` | Model used by optional post-run classification. Heuristic fallback is used when no API key is available or classification fails. |
 | `SIGNAL_RECYCLER_UPSTREAM_URL` | No | `https://api.openai.com` | Upstream OpenAI-compatible API target. Do not set this to the proxy URL. |
 | `SIGNAL_RECYCLER_LOG_LEVEL` | No | unset | Set to `info` or `error` when debugging server behavior. |
 | `SIGNAL_RECYCLER_MOCK_CODEX` | No | `0` | Set to `1` for UI-only demos without live Codex/OpenAI calls. |
