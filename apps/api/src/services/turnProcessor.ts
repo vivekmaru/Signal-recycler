@@ -2,6 +2,7 @@ import { type AgentAdapter, type CandidateRule, type MemoryRecord } from "@signa
 import { classifyTurn } from "../classifier.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
+import { buildContextEnvelope } from "./contextEnvelope.js";
 
 export type ProcessTurnInput = {
   store: SignalRecyclerStore;
@@ -109,7 +110,16 @@ async function runTurn(
         ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
       });
     case "mock":
-      return runMockTurn(input);
+      return runMockTurn({
+        ...input,
+        prompt: buildContextEnvelope({
+          store: input.store,
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          adapter: "mock",
+          prompt: input.prompt
+        }).prompt
+      });
     case "codex_cli":
       throw new Error("Agent adapter is not configured: codex_cli");
   }
