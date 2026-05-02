@@ -6,11 +6,11 @@ Residual risk: the plan assumes `codex exec --json` can produce parseable struct
 
 Next action: during Task 5, verify local `codex exec --json` output and adjust parser tests to match observed event types before opening the PR.
 
-## P1: Keep Claude Code Evaluation Honest
+## P1: Claude Code Adapter Implementation
 
 Residual risk: Claude Code support is easy to over-claim because Phase 4 only requires evaluation, not full implementation.
 
-Next action: complete `docs/research/claude-code-headless-adapter-evaluation.md` in Phase 4 and keep adapter implementation in backlog unless command/event behavior is verified.
+Next action: use `docs/research/claude-code-headless-adapter-evaluation.md` to verify local CLI behavior, then implement `createClaudeCodeAdapter` behind an explicit opt-in flag only after command syntax, event output, cwd behavior, and auth behavior are confirmed.
 
 ## P2: Revisit Plan Granularity After Task 4
 
