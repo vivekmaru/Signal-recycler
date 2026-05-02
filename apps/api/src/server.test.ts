@@ -1518,6 +1518,71 @@ describe("api", () => {
     expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
   });
 
+  it("does not inject memories for low-signal generic proxy prompts", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const packageManager = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const theme = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens for UI theme changes.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-low-signal-retrieval"
+      },
+      payload: JSON.stringify({ input: "test" })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-low-signal-retrieval");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input).toBe("test");
+    expect(forwardedBody.input).not.toContain("Use pnpm test instead of npm test.");
+    expect(forwardedBody.input).not.toContain("Use approved theme tokens");
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "test",
+      selected: [],
+      skipped: [
+        expect.objectContaining({ memoryId: packageManager.id }),
+        expect.objectContaining({ memoryId: theme.id })
+      ],
+      metrics: expect.objectContaining({
+        approvedMemories: 2,
+        selectedMemories: 0,
+        skippedMemories: 2
+      })
+    });
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(packageManager.id)).toHaveLength(0);
+    expect(store.listMemoryUsages(theme.id)).toHaveLength(0);
+  });
+
   it("skips retrieval when proxy request has no query fields", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ ok: true }), { status: 200 })
