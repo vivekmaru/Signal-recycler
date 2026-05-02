@@ -7,6 +7,8 @@ import { useDashboardData } from "./hooks/useDashboardData";
 import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
 import { DashboardView } from "./views/DashboardView";
+import { ContextIndexView } from "./views/ContextIndexView";
+import { EvalsView } from "./views/EvalsView";
 import { MemoryView } from "./views/MemoryView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { SessionsView } from "./views/SessionsView";
@@ -171,11 +173,15 @@ export function App() {
               />
             ) : null}
             {route === "memory" ? <MemoryView memories={data.memories} onChanged={data.refresh} /> : null}
-            {route !== "dashboard" && route !== "sessions" && route !== "session" && route !== "memory" ? (
-              <RoutePlaceholder
-                route={route}
-                selectedSession={selectedSession}
-              />
+            {route === "context" ? <ContextIndexView /> : null}
+            {route === "evals" ? <EvalsView /> : null}
+            {route !== "dashboard" &&
+            route !== "sessions" &&
+            route !== "session" &&
+            route !== "memory" &&
+            route !== "context" &&
+            route !== "evals" ? (
+              <RoutePlaceholder route={route} selectedSession={selectedSession} />
             ) : null}
           </>
         )}
@@ -211,17 +217,21 @@ function RoutePlaceholder({
   route: AppRoute;
   selectedSession: SessionRecord | null;
 }) {
-  if (route === "dashboard" || route === "sessions" || route === "session" || route === "memory") return null;
+  if (
+    route === "dashboard" ||
+    route === "sessions" ||
+    route === "session" ||
+    route === "memory" ||
+    route === "context" ||
+    route === "evals"
+  ) {
+    return null;
+  }
 
-  const copy: Record<Exclude<AppRoute, "dashboard" | "sessions" | "session" | "memory">, { title: string; body: string }> = {
-    context: {
-      title: "Context Index preview",
-      body: "No source index, embeddings, reranking, or vector retrieval UI is implemented in this phase task."
-    },
-    evals: {
-      title: "Evals preview",
-      body: "This is a read-only placeholder until real evaluation results are exposed by the backend."
-    },
+  const copy: Record<
+    Exclude<AppRoute, "dashboard" | "sessions" | "session" | "memory" | "context" | "evals">,
+    { title: string; body: string }
+  > = {
     sync: {
       title: "Sync placeholder",
       body: "Signal Recycler remains local-first here. Cloud sync is out of scope for this phase task."
