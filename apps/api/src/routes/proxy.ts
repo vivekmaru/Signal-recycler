@@ -2,6 +2,7 @@ import { type FastifyInstance } from "fastify";
 import { compressRequestBody } from "../compressor.js";
 import { injectIntoRequestBody } from "../playbook.js";
 import { recordMemoryInjection } from "../services/memoryInjection.js";
+import { retrieveRelevantMemories } from "../services/memoryRetrieval.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
 
@@ -56,13 +57,39 @@ export async function registerProxyRoutes(
       }
     }
 
+    const retrieval =
+      rules.length > 0
+        ? retrieveRelevantMemories({
+            store: options.store,
+            projectId: options.projectId,
+            query: extractProxyQueryText(rawBody),
+            limit: 5
+          })
+        : null;
+    if (retrieval) {
+      options.store.createEvent({
+        sessionId,
+        category: "memory_retrieval",
+        title: `Retrieved ${retrieval.metrics.selectedMemories} of ${retrieval.metrics.approvedMemories} approved memories`,
+        body: buildMemoryRetrievalSummary(retrieval.metrics.selectedMemories, retrieval.metrics.skippedMemories),
+        metadata: {
+          projectId: options.projectId,
+          query: retrieval.query,
+          selected: retrieval.selected,
+          skipped: retrieval.skipped,
+          metrics: retrieval.metrics
+        }
+      });
+    }
+
+    const selectedRules = retrieval?.memories ?? [];
     const injection = rawBody
-      ? injectProxyBody(rawBody, rules)
+      ? injectProxyBody(rawBody, selectedRules)
       : { body: undefined, injected: false };
     const body = injection.body;
     const finalSize = sizeOf(body);
     const finalItems = countInputItems(body);
-    const injectedRules = injection.injected ? rules.length : 0;
+    const injectedRules = injection.injected ? selectedRules.length : 0;
 
     options.store.createEvent({
       sessionId,
@@ -91,7 +118,15 @@ export async function registerProxyRoutes(
         charsRemoved,
         tokensRemoved,
         injectedRules,
-        ruleIds: injection.injected ? rules.map((r) => r.id) : []
+        ruleIds: injection.injected ? selectedRules.map((r) => r.id) : [],
+        retrieval: retrieval
+          ? {
+              query: retrieval.query,
+              selected: retrieval.selected,
+              skipped: retrieval.skipped,
+              metrics: retrieval.metrics
+            }
+          : null
       }
     });
     const headers = new Headers();
@@ -119,11 +154,19 @@ export async function registerProxyRoutes(
           projectId: options.projectId,
           sessionId,
           adapter: "proxy",
-          memories: rules,
+          memories: selectedRules,
           reason: "approved_project_memory",
           metadata: {
             method: request.method,
-            path: tail
+            path: tail,
+            retrieval: retrieval
+              ? {
+                  query: retrieval.query,
+                  selected: retrieval.selected,
+                  skipped: retrieval.skipped,
+                  metrics: retrieval.metrics
+                }
+              : null
           }
         });
       } catch (error) {
@@ -145,6 +188,10 @@ export async function registerProxyRoutes(
     });
     return reply.send(upstream.body);
   });
+}
+
+function buildMemoryRetrievalSummary(selected: number, skipped: number): string {
+  return `Selected ${selected} approved memor${selected === 1 ? "y" : "ies"}; skipped ${skipped}.`;
 }
 
 function sizeOf(body: unknown): number {
@@ -218,6 +265,42 @@ function injectProxyBody(
   }
   const injectedBody = injectIntoRequestBody(body, rules);
   return { body: injectedBody, injected: !jsonEqual(body, injectedBody) };
+}
+
+function extractProxyQueryText(body: unknown): string {
+  if (body === undefined || body === null) return "";
+  if (typeof body === "string") {
+    try {
+      return extractProxyQueryText(JSON.parse(body) as unknown);
+    } catch {
+      return "";
+    }
+  }
+  if (!isPlainObject(body)) return "";
+
+  const parts = [
+    extractText((body as Record<string, unknown>).instructions),
+    extractText((body as Record<string, unknown>).input),
+    extractText((body as Record<string, unknown>).messages)
+  ].filter((part) => part.length > 0);
+
+  return parts.join("\n\n");
+}
+
+function extractText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value.map(extractText).filter((part) => part.length > 0).join("\n");
+  }
+  if (!isPlainObject(value)) return "";
+
+  const text = extractText(value.text);
+  const content = extractText(value.content);
+  return [text, content].filter((part) => part.length > 0).join("\n");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
