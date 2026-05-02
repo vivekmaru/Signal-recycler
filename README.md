@@ -158,6 +158,7 @@ http://127.0.0.1:3001
 | `SIGNAL_RECYCLER_UPSTREAM_URL` | No | `https://api.openai.com` | Upstream OpenAI-compatible API target. Do not set this to the proxy URL. |
 | `SIGNAL_RECYCLER_LOG_LEVEL` | No | unset | Set to `info` or `error` when debugging server behavior. |
 | `SIGNAL_RECYCLER_MOCK_CODEX` | No | `0` | Set to `1` for UI-only demos without live Codex/OpenAI calls. |
+| `SIGNAL_RECYCLER_CODEX_CLI` | No | `0` | Set to `1` to enable the opt-in Codex CLI owned-session adapter. |
 | `SIGNAL_RECYCLER_LIVE_AGENT` | No | unset | Optional eval-only adapter selector for `pnpm eval:live`. Supported values: `codex`, `claude`. |
 | `SIGNAL_RECYCLER_LIVE_AGENT_TIMEOUT_MS` | No | `120000` | Timeout for the optional live agent eval. |
 
@@ -202,6 +203,22 @@ pnpm codex:uninstall
 ```
 
 The installer edits only a marked Signal Recycler block in `~/.codex/config.toml` and creates a backup the first time it modifies the file.
+
+### Codex CLI owned-session adapter
+
+The headless Codex CLI adapter is opt-in and is not the default run path:
+
+```bash
+SIGNAL_RECYCLER_CODEX_CLI=1 pnpm dev
+```
+
+Once enabled, run a session with an explicit adapter selection:
+
+```json
+{ "prompt": "Run validation.", "adapter": "codex_cli" }
+```
+
+This adapter shells out to the local `codex exec --json` command and uses your local Codex CLI authentication. The agent run does not require `OPENAI_API_KEY`, though the optional post-run classifier still uses `OPENAI_API_KEY` when configured.
 
 ## Dashboard
 
