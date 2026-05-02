@@ -94,6 +94,52 @@ describe("memory retrieval", () => {
     });
   });
 
+  it("selects no memories for low-signal generic test prompts", () => {
+    const store = createStore(":memory:");
+    const packageManager = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    const theme = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "theme",
+        rule: "Use approved color tokens for UI theme changes.",
+        reason: "Theme work follows design tokens."
+      }).id
+    );
+
+    const result = retrieveRelevantMemories({
+      store,
+      projectId: "demo",
+      query: "test",
+      limit: 5
+    });
+
+    expect(result.memories).toEqual([]);
+    expect(result.selected).toEqual([]);
+    expect(result.skipped).toEqual([
+      {
+        memoryId: packageManager.id,
+        reason: "not_relevant"
+      },
+      {
+        memoryId: theme.id,
+        reason: "not_relevant"
+      }
+    ]);
+    expect(result.metrics).toEqual({
+      approvedMemories: 2,
+      selectedMemories: 0,
+      skippedMemories: 2,
+      limit: 5
+    });
+  });
+
   it("prefers scope match reasons when category is not present in the query", () => {
     const store = createStore(":memory:");
     const selected = store.approveRule(

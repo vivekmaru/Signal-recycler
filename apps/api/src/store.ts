@@ -788,6 +788,9 @@ const SEARCH_STOP_WORDS = new Set([
   "that",
   "the",
   "to",
+  "test",
+  "testing",
+  "tests",
   "with"
 ]);
 

@@ -569,6 +569,33 @@ describe("store", () => {
     ).toEqual([]);
   });
 
+  it("returns no memories for test-only search queries", () => {
+    const store = createStore(":memory:");
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test for validation.",
+        reason: "Current project convention."
+      }).id
+    );
+
+    expect(
+      store.searchApprovedMemories({
+        projectId: "demo",
+        query: "test",
+        limit: 10
+      })
+    ).toEqual([]);
+    expect(
+      store.searchApprovedMemories({
+        projectId: "demo",
+        query: "tests testing",
+        limit: 10
+      })
+    ).toEqual([]);
+  });
+
   it("does not supersede memory with itself", () => {
     const store = createStore(":memory:");
     const memory = store.approveRule(
