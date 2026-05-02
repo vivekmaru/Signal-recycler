@@ -1,4 +1,12 @@
-import type { PlaybookRule, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
+import type {
+  AgentAdapter,
+  MemoryRecord,
+  MemoryRetrievalResult,
+  MemoryUsage,
+  PlaybookRule,
+  SessionRecord,
+  TimelineEvent
+} from "@signal-recycler/shared";
 
 export type ApiConfig = {
   projectId: string;
@@ -19,6 +27,13 @@ export type RunResult = {
   candidateRules: PlaybookRule[];
 };
 
+export type MemoryAuditResult = {
+  memory: MemoryRecord;
+  usages: MemoryUsage[];
+};
+
+export type MemoryRetrievalPreview = MemoryRetrievalResult;
+
 export async function createSession(title?: string): Promise<SessionRecord> {
   const response = await fetch("/api/sessions", {
     method: "POST",
@@ -28,8 +43,32 @@ export async function createSession(title?: string): Promise<SessionRecord> {
   return readJson(response);
 }
 
+export async function listSessions(): Promise<SessionRecord[]> {
+  return readJson(await fetch("/api/sessions"));
+}
+
 export async function listRules(): Promise<PlaybookRule[]> {
   return readJson(await fetch("/api/rules"));
+}
+
+export async function listMemories(): Promise<MemoryRecord[]> {
+  return readJson(await fetch("/api/memories"));
+}
+
+export async function fetchMemoryAudit(id: string): Promise<MemoryAuditResult> {
+  return readJson(await fetch(`/api/memories/${id}/audit`));
+}
+
+export async function previewMemoryRetrieval(input: {
+  prompt: string;
+  limit?: number;
+}): Promise<MemoryRetrievalPreview> {
+  const response = await fetch("/api/memory/retrieve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return readJson(response);
 }
 
 export async function createManualRule(input: {
@@ -53,11 +92,15 @@ export async function listFirehose(limit = 100): Promise<TimelineEvent[]> {
   return readJson(await fetch(`/api/firehose/events?limit=${limit}`));
 }
 
-export async function runSession(sessionId: string, prompt: string): Promise<RunResult> {
+export async function runSession(
+  sessionId: string,
+  prompt: string,
+  adapter: AgentAdapter = "default"
+): Promise<RunResult> {
   const response = await fetch(`/api/sessions/${sessionId}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt })
+    body: JSON.stringify({ prompt, adapter })
   });
   return readJson(response);
 }
