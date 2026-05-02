@@ -732,7 +732,43 @@ describe("api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().finalResponse).toContain("Encountered a failure");
-    expect(events.map((event) => event.category)).toContain("codex_event");
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "codex_event",
+          title: "Codex response",
+          body: expect.stringContaining("Encountered a failure")
+        })
+      ])
+    );
+  });
+
+  it("returns a clear error when the Codex CLI adapter is selected before configuration", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "default runner response", items: [] })
+      }
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Run package manager validation for this repo.",
+        adapter: "codex_cli"
+      }
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({
+      error: "Codex run failed",
+      message: "Agent adapter is not configured: codex_cli"
+    });
   });
 
   it("does not reject proxy requests before the handler when content-length is stale", async () => {

@@ -19,14 +19,7 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
   items: unknown[];
   candidateRules: ReturnType<SignalRecyclerStore["listRules"]>;
 }> {
-  const turn =
-    input.adapter === "mock"
-      ? await runMockTurn(input)
-      : await input.codexRunner.run({
-          sessionId: input.sessionId,
-          prompt: input.prompt,
-          ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
-        });
+  const turn = await runTurn(input);
 
   const codexEvent = input.store.createEvent({
     sessionId: input.sessionId,
@@ -101,6 +94,28 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
   });
 
   return { finalResponse: turn.finalResponse, items: turn.items, candidateRules };
+}
+
+async function runTurn(
+  input: ProcessTurnInput
+): Promise<{ finalResponse: string; items: unknown[] }> {
+  switch (input.adapter) {
+    case undefined:
+    case "default":
+    case "codex_sdk":
+      return input.codexRunner.run({
+        sessionId: input.sessionId,
+        prompt: input.prompt,
+        ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
+      });
+    case "mock":
+      return runMockTurn(input);
+    case "codex_cli":
+      throw new Error("Agent adapter is not configured: codex_cli");
+  }
+
+  const unhandledAdapter: never = input.adapter;
+  throw new Error(`Agent adapter is not configured: ${unhandledAdapter}`);
 }
 
 async function runMockTurn(
