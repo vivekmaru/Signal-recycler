@@ -134,22 +134,25 @@ async function runAgentAdapter(
   input: ProcessTurnInput,
   adapter: AgentAdapter
 ): Promise<AgentRunResult> {
-  const prompt =
-    adapter.id === "mock"
-      ? buildContextEnvelope({
-          store: input.store,
-          projectId: input.projectId,
-          sessionId: input.sessionId,
-          adapter: "mock",
-          prompt: input.prompt
-        }).prompt
-      : input.prompt;
+  const prompt = shouldBuildContextEnvelope(adapter)
+    ? buildContextEnvelope({
+        store: input.store,
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        adapter: adapter.id,
+        prompt: input.prompt
+      }).prompt
+    : input.prompt;
 
   return adapter.run({
     sessionId: input.sessionId,
     prompt,
     ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
   });
+}
+
+function shouldBuildContextEnvelope(adapter: AgentAdapter): boolean {
+  return adapter.id === "mock" || adapter.id === "codex_cli";
 }
 
 function isCoveredByApprovedMemory(candidate: CandidateRule, memories: MemoryRecord[]): boolean {

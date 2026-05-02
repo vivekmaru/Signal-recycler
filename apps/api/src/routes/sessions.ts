@@ -61,6 +61,7 @@ export async function registerSessionRoutes(
         sessionId: id,
         prompt: parsed.prompt,
         adapter: parsed.adapter,
+        workingDirectory,
         ...(options.agentAdapterRegistry ? { agentAdapterRegistry: options.agentAdapterRegistry } : {})
       });
     } catch (error) {

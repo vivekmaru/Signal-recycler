@@ -912,6 +912,65 @@ describe("api", () => {
     });
   });
 
+  it("injects memory and working directory into configured Codex CLI adapter runs", async () => {
+    const store = createStore(":memory:");
+    const rule = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    let capturedPrompt = "";
+    let capturedWorkingDirectory: string | undefined;
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              capturedWorkingDirectory = input.workingDirectory;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Please run package manager validation with pnpm.",
+        adapter: "codex_cli"
+      }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("Use pnpm for package scripts.");
+    expect(capturedWorkingDirectory).toBe(TEST_APP_OPTIONS.workingDirectory);
+    expect(events.map((event) => event.category)).toEqual(
+      expect.arrayContaining(["memory_retrieval", "memory_injection"])
+    );
+    expect(events.find((event) => event.category === "memory_injection")?.metadata).toMatchObject({
+      adapter: "codex_cli",
+      memoryIds: [rule.id]
+    });
+  });
+
   it("returns a clear error when the Codex CLI adapter is selected before configuration", async () => {
     const store = createStore(":memory:");
     const app = await createApp({

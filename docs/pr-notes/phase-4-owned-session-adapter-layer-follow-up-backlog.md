@@ -36,6 +36,12 @@ Residual risk: Phase 4 keeps retrieval/injection behavior shared, but review not
 
 Next action: when the next retrieval or context-envelope change lands, consolidate repeated retrieval summary formatting into a single helper without changing event metadata shape.
 
+## P2 Codex SDK Mock Compatibility Cleanup
+
+Residual risk: `codex_sdk` retains a legacy mock-mode retrieval/injection path for compatibility, while owned-session adapters use the shared context envelope.
+
+Next action: after Codex SDK compatibility requirements settle, move the SDK mock branch onto the shared context envelope or document why it must remain separate.
+
 ## P2 Configurable Retain Source Labels
 
 Residual risk: `POST /api/memory/retain` records source kind `import` with the fixed label `api`, which proves API import provenance but does not distinguish individual future integrations.
