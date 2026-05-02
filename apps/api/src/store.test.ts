@@ -40,7 +40,8 @@ describe("store", () => {
     const store = createStore(":memory:");
     const internals = store.inspectSchema();
 
-    expect(internals.schemaVersion).toBe(2);
+    expect(internals.schemaVersion).toBe(3);
+    expect(internals.tables).toEqual(expect.arrayContaining(["memory_fts"]));
     expect(internals.indexes).toEqual(
       expect.arrayContaining([
         "idx_sessions_project_created",
@@ -72,7 +73,7 @@ describe("store", () => {
       sourceEventId: null
     });
 
-    expect(store.inspectSchema().schemaVersion).toBe(2);
+    expect(store.inspectSchema().schemaVersion).toBe(3);
     expect(candidate.memoryType).toBe("rule");
     expect(candidate.scope).toEqual({ type: "project", value: null });
     expect(candidate.source).toEqual({ kind: "manual", author: "local-user" });
@@ -427,6 +428,144 @@ describe("store", () => {
     expect(store.listApprovedRules("demo").map((r) => r.id)).toEqual([newMemory.id]);
   });
 
+  it("searches approved memories with FTS and BM25 ranking", () => {
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "theme",
+        rule: "Use the approved theme tokens.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+
+    const results = store.searchApprovedMemories({
+      projectId: "demo",
+      query: "validate tests with package manager",
+      limit: 1
+    });
+
+    expect(results.map((result) => result.memory.id)).toEqual([relevant.id]);
+    expect(results[0]?.rank).toBe(1);
+    expect(results[0]?.score).toBeGreaterThan(0);
+  });
+
+  it("does not return rejected, superseded, or cross-project memories from search", () => {
+    const store = createStore(":memory:");
+    const current = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test for validation.",
+        reason: "Current project convention."
+      }).id
+    );
+    const old = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm test for validation.",
+        reason: "Old convention."
+      }).id
+    );
+    store.supersedeRule(old.id, current.id);
+    const rejected = store.createRuleCandidate({
+      projectId: "demo",
+      category: "package-manager",
+      rule: "Use yarn test for validation.",
+      reason: "Rejected convention."
+    });
+    store.rejectRule(rejected.id);
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other",
+        category: "package-manager",
+        rule: "Use npm test for validation.",
+        reason: "Other project convention."
+      }).id
+    );
+
+    const results = store.searchApprovedMemories({
+      projectId: "demo",
+      query: "validation test command",
+      limit: 10
+    });
+
+    expect(results.map((result) => result.memory.id)).toEqual([current.id]);
+  });
+
+  it("returns the requested number of unique approved memory matches", () => {
+    const store = createStore(":memory:");
+    const first = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "Duplicate imported compatibility rule."
+      }).id
+    );
+    const second = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm install instead of npm install.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+
+    const results = store.searchApprovedMemories({
+      projectId: "demo",
+      query: "package manager pnpm",
+      limit: 2
+    });
+
+    expect(results.map((result) => result.memory.id)).toEqual([first.id, second.id]);
+    expect(results.map((result) => result.rank)).toEqual([1, 2]);
+  });
+
+  it("returns no memories for empty or stopword-only search queries", () => {
+    const store = createStore(":memory:");
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test for validation.",
+        reason: "Current project convention."
+      }).id
+    );
+
+    expect(
+      store.searchApprovedMemories({
+        projectId: "demo",
+        query: "   ",
+        limit: 10
+      })
+    ).toEqual([]);
+    expect(
+      store.searchApprovedMemories({
+        projectId: "demo",
+        query: "the and with",
+        limit: 10
+      })
+    ).toEqual([]);
+  });
+
   it("does not supersede memory with itself", () => {
     const store = createStore(":memory:");
     const memory = store.approveRule(
@@ -568,7 +707,7 @@ describe("store", () => {
     const store = createStore(path);
     const rule = store.getRule("rule_existing");
 
-    expect(store.inspectSchema().schemaVersion).toBe(2);
+    expect(store.inspectSchema().schemaVersion).toBe(3);
     expect(rule).toMatchObject({
       memoryType: "rule",
       scope: { type: "project", value: null },
@@ -745,7 +884,7 @@ describe("store", () => {
     const store = createStore(path);
     const rule = store.getRule("rule_partial");
 
-    expect(store.inspectSchema().schemaVersion).toBe(2);
+    expect(store.inspectSchema().schemaVersion).toBe(3);
     expect(rule?.updatedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 

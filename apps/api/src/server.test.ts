@@ -285,6 +285,142 @@ describe("api", () => {
     });
   });
 
+  it("previews relevant memory retrieval for a prompt", async () => {
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation", limit: 1 }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().selected.map((decision: { memoryId: string }) => decision.memoryId)).toEqual([
+      relevant.id
+    ]);
+    expect(response.json()).not.toHaveProperty("memories");
+
+    const defaultLimit = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation" }
+    });
+
+    expect(defaultLimit.statusCode).toBe(200);
+    expect(defaultLimit.json().metrics.limit).toBe(5);
+  });
+
+  it("returns 400 for memory retrieval requests without a prompt", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: {}
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memory retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("returns 400 for memory retrieval requests with an invalid limit", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation", limit: 21 }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memory retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("does not include other-project memories in retrieval previews", async () => {
+    const store = createStore(":memory:");
+    const current = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    const other = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other-project",
+        category: "package-manager",
+        rule: "Use npm test for this other project.",
+        reason: "The other repo uses npm."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation", limit: 5 }
+    });
+
+    const selectedIds = response
+      .json()
+      .selected.map((decision: { memoryId: string }) => decision.memoryId);
+    const skippedIds = response
+      .json()
+      .skipped.map((memory: { memoryId: string }) => memory.memoryId);
+    expect(response.statusCode).toBe(200);
+    expect(selectedIds).toEqual([current.id]);
+    expect(selectedIds).not.toContain(other.id);
+    expect(skippedIds).not.toContain(other.id);
+  });
+
   it("returns memory audit trail with source and usages", async () => {
     const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-api-")), "test.sqlite");
     const store = createStore(databasePath);
@@ -580,7 +716,7 @@ describe("api", () => {
         "content-type": "application/json",
         "x-signal-recycler-session-id": "proxy"
       },
-      payload: JSON.stringify({ input: "hello" })
+      payload: JSON.stringify({ input: "Use pnpm for package scripts." })
     });
     const events = store.listEvents("proxy");
 
@@ -598,6 +734,224 @@ describe("api", () => {
     });
     expect(store.listMemoryUsages(manualRule.id)).toHaveLength(1);
     expect(store.getRule(manualRule.id)?.lastUsedAt).not.toBeNull();
+  });
+
+  it("retrieves and injects only relevant memories on proxy requests", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const unrelated = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-retrieval"
+      },
+      payload: JSON.stringify({ input: "Please run package manager validation with pnpm." })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-retrieval");
+    const retrievalEvent = events.find((event) => event.category === "memory_retrieval");
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input).toContain("Use pnpm for package scripts.");
+    expect(forwardedBody.input).not.toContain("Use approved theme tokens.");
+    expect(retrievalEvent?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "Please run package manager validation with pnpm.",
+      selected: [expect.objectContaining({ memoryId: relevant.id })],
+      skipped: [expect.objectContaining({ memoryId: unrelated.id })],
+      metrics: {
+        approvedMemories: 2,
+        selectedMemories: 1,
+        skippedMemories: 1,
+        limit: 5
+      }
+    });
+    expect(memoryEvent?.metadata).toMatchObject({
+      memoryIds: [relevant.id],
+      retrieval: {
+        query: "Please run package manager validation with pnpm.",
+        selected: [expect.objectContaining({ memoryId: relevant.id })],
+        skipped: [expect.objectContaining({ memoryId: unrelated.id })],
+        metrics: expect.objectContaining({ selectedMemories: 1 })
+      }
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(1);
+    expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
+  });
+
+  it("does not inject all approved memories when proxy retrieval selects nothing", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-no-retrieval-hit"
+      },
+      payload: JSON.stringify({ input: "Investigate frobnicator latency." })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-no-retrieval-hit");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input).toBe("Investigate frobnicator latency.");
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "Investigate frobnicator latency.",
+      selected: [],
+      skipped: [expect.objectContaining({ memoryId: memory.id })],
+      metrics: expect.objectContaining({ selectedMemories: 0, skippedMemories: 1 })
+    });
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("does not inject all approved memories when proxy retrieval has only stopwords", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-stopword-retrieval"
+      },
+      payload: JSON.stringify({ input: "the and of to" })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-stopword-retrieval");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input).toBe("the and of to");
+    expect(forwardedBody.input).not.toContain("Use pnpm for package scripts.");
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "the and of to",
+      selected: [],
+      skipped: [expect.objectContaining({ memoryId: memory.id })],
+      metrics: expect.objectContaining({
+        approvedMemories: 1,
+        selectedMemories: 0,
+        skippedMemories: 1
+      })
+    });
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
+  it("skips retrieval when proxy request has no query fields", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-missing-query"
+      },
+      payload: JSON.stringify({ metadata: { source: "test" } })
+    });
+    const forwardedText = String(fetchMock.mock.calls[0]?.[1]?.body);
+    const forwardedBody = JSON.parse(forwardedText);
+    const events = store.listEvents("proxy-missing-query");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody).toEqual({ metadata: { source: "test" } });
+    expect(forwardedText).not.toContain("<signal-recycler-playbook>");
+    expect(forwardedText).not.toContain("Use pnpm for package scripts.");
+    expect(events.some((event) => event.category === "memory_retrieval")).toBe(false);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
   });
 
   it("does not record proxy memory usage for requests without an injected body", async () => {
@@ -790,7 +1144,7 @@ describe("api", () => {
         "content-type": "application/json",
         "x-signal-recycler-session-id": "proxy-audit-fail"
       },
-      payload: JSON.stringify({ input: "hello" })
+      payload: JSON.stringify({ input: "Use pnpm for package scripts." })
     });
 
     expect(response.statusCode).toBe(200);
@@ -845,15 +1199,89 @@ describe("api", () => {
     const events = store.listEvents("codex-runner");
     const memoryEvent = events.find((event) => event.category === "memory_injection");
 
-    expect(events.map((event) => event.category)).toEqual(["proxy_request", "memory_injection"]);
+    expect(events.map((event) => event.category)).toEqual([
+      "proxy_request",
+      "memory_retrieval",
+      "memory_injection"
+    ]);
     expect(events[0]?.metadata).toMatchObject({ approvedRulesAvailable: 1 });
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "Apply the theme.",
+      selected: [expect.objectContaining({ memoryId: rule.id })],
+      metrics: expect.objectContaining({ selectedMemories: 1 })
+    });
     expect(memoryEvent?.metadata).toMatchObject({
       projectId: TEST_APP_OPTIONS.projectId,
       adapter: "mock-codex",
-      memoryIds: [rule.id]
+      memoryIds: [rule.id],
+      retrieval: expect.objectContaining({
+        query: "Apply the theme.",
+        metrics: expect.objectContaining({ selectedMemories: 1 })
+      })
     });
     expect(store.listMemoryUsages(rule.id)).toHaveLength(1);
     expect(store.getRule(rule.id)?.lastUsedAt).not.toBeNull();
+  });
+
+  it("retrieves and injects only relevant memories from the mock Codex runner", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const store = createStore(":memory:");
+    const unrelated = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use the approved theme tokens.",
+        reason: "Manual demo rule."
+      }).id
+    );
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const runner = createCodexRunner({
+      store,
+      apiPort: 3001,
+      projectId: TEST_APP_OPTIONS.projectId,
+      workingDirectory: TEST_APP_OPTIONS.workingDirectory
+    });
+
+    const result = await runner.run({
+      sessionId: "codex-runner-retrieval",
+      prompt: "Please run package manager validation with pnpm."
+    });
+    const events = store.listEvents("codex-runner-retrieval");
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
+
+    expect(result.finalResponse).toContain("Use pnpm for package scripts.");
+    expect(result.finalResponse).not.toContain("Use the approved theme tokens.");
+    expect(events.map((event) => event.category)).toEqual([
+      "proxy_request",
+      "memory_retrieval",
+      "memory_injection"
+    ]);
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "Please run package manager validation with pnpm.",
+      selected: [expect.objectContaining({ memoryId: relevant.id })],
+      skipped: [expect.objectContaining({ memoryId: unrelated.id })],
+      metrics: expect.objectContaining({ selectedMemories: 1, skippedMemories: 1 })
+    });
+    expect(memoryEvent?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "mock-codex",
+      memoryIds: [relevant.id],
+      retrieval: expect.objectContaining({
+        query: "Please run package manager validation with pnpm.",
+        metrics: expect.objectContaining({ selectedMemories: 1 })
+      })
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(1);
+    expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
   });
 
   it("does not fail mock Codex runs when memory audit persistence fails", async () => {

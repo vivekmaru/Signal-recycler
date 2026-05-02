@@ -63,7 +63,8 @@ export const eventCategorySchema = z.enum([
   "classifier_result",
   "rule_candidate",
   "rule_auto_approved",
-  "memory_injection"
+  "memory_injection",
+  "memory_retrieval"
 ]);
 export type EventCategory = z.infer<typeof eventCategorySchema>;
 
@@ -122,6 +123,37 @@ export const memoryUsageSchema = z.object({
 });
 export type MemoryUsage = z.infer<typeof memoryUsageSchema>;
 
+export const memoryRetrievalDecisionSchema = z.object({
+  memoryId: z.string(),
+  rank: z.number().int().positive().nullable(),
+  score: z.number(),
+  reason: z.string(),
+  category: z.string(),
+  memoryType: memoryTypeSchema,
+  scope: memoryScopeSchema,
+  source: memorySourceSchema
+});
+export type MemoryRetrievalDecision = z.infer<typeof memoryRetrievalDecisionSchema>;
+
+export const skippedMemorySchema = z.object({
+  memoryId: z.string(),
+  reason: z.enum(["not_approved", "superseded", "scope_mismatch", "not_relevant", "cross_project"])
+});
+export type SkippedMemory = z.infer<typeof skippedMemorySchema>;
+
+export const memoryRetrievalResultSchema = z.object({
+  query: z.string(),
+  selected: z.array(memoryRetrievalDecisionSchema),
+  skipped: z.array(skippedMemorySchema),
+  metrics: z.object({
+    approvedMemories: z.number().int().nonnegative(),
+    selectedMemories: z.number().int().nonnegative(),
+    skippedMemories: z.number().int().nonnegative(),
+    limit: z.number().int().positive()
+  })
+});
+export type MemoryRetrievalResult = z.infer<typeof memoryRetrievalResultSchema>;
+
 export const ruleConfidenceSchema = memoryConfidenceSchema;
 export type RuleConfidence = MemoryConfidence;
 
@@ -143,6 +175,11 @@ export type ClassifierResult = z.infer<typeof classifierResultSchema>;
 
 export const runRequestSchema = z.object({
   prompt: z.string().min(1)
+});
+
+export const memoryRetrievalRequestSchema = z.object({
+  prompt: z.string().min(1),
+  limit: z.number().int().positive().max(20).default(5)
 });
 
 export const createSessionRequestSchema = z.object({

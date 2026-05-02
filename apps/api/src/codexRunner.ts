@@ -1,6 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
 import { injectPlaybookRules } from "./playbook.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
+import { retrieveRelevantMemories } from "./services/memoryRetrieval.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -34,23 +35,53 @@ export function createCodexRunner(input: {
       });
 
       if (process.env.SIGNAL_RECYCLER_MOCK_CODEX === "1") {
-        const injected = injectPlaybookRules(prompt, rules);
+        const retrieval = retrieveRelevantMemories({
+          store: input.store,
+          projectId: input.projectId,
+          query: prompt,
+          limit: 5
+        });
+        input.store.createEvent({
+          sessionId,
+          category: "memory_retrieval",
+          title: `Retrieved ${retrieval.metrics.selectedMemories} of ${retrieval.metrics.approvedMemories} approved memories`,
+          body: buildMemoryRetrievalSummary(
+            retrieval.metrics.selectedMemories,
+            retrieval.metrics.skippedMemories
+          ),
+          metadata: {
+            projectId: input.projectId,
+            query: retrieval.query,
+            selected: retrieval.selected,
+            skipped: retrieval.skipped,
+            metrics: retrieval.metrics
+          }
+        });
+        const injected = injectPlaybookRules(prompt, retrieval.memories);
         try {
           recordMemoryInjection({
             store: input.store,
             projectId: input.projectId,
             sessionId,
             adapter: "mock-codex",
-            memories: rules,
-            reason: "approved_project_memory"
+            memories: retrieval.memories,
+            reason: "approved_project_memory",
+            metadata: {
+              retrieval: {
+                query: retrieval.query,
+                selected: retrieval.selected,
+                skipped: retrieval.skipped,
+                metrics: retrieval.metrics
+              }
+            }
           });
         } catch (error) {
           console.warn("[signal-recycler] Mock Codex memory audit failed", error);
         }
         return {
           finalResponse:
-            rules.length > 0
-              ? `Checking learned constraints from playbook... ${rules[0]?.rule ?? ""} Applying rules before proceeding.`
+            retrieval.memories.length > 0
+              ? `Checking learned constraints from playbook... ${retrieval.memories[0]?.rule ?? ""} Applying rules before proceeding.`
               : "Encountered a failure. The correction should be captured as a durable rule.",
           items: [{ type: "mock", injected }]
         };
@@ -75,6 +106,10 @@ export function createCodexRunner(input: {
       };
     }
   };
+}
+
+function buildMemoryRetrievalSummary(selected: number, skipped: number): string {
+  return `Selected ${selected} approved memor${selected === 1 ? "y" : "ies"}; skipped ${skipped}.`;
 }
 
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {

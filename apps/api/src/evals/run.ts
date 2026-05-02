@@ -7,6 +7,7 @@ import { runInjectionEval } from "./suites/injectionEval.js";
 import { runIsolationEval } from "./suites/isolationEval.js";
 import { runLiveEval } from "./suites/liveEval.js";
 import { runMemoryAuditEval } from "./suites/memoryAuditEval.js";
+import { runRetrievalEval } from "./suites/retrievalEval.js";
 import { runScenarioEval } from "./suites/scenarioEval.js";
 import { type EvalSuiteResult } from "./types.js";
 
@@ -18,6 +19,7 @@ suites.push(await timed("compressor", runCompressorEval));
 suites.push(await timed("classifier", runClassifierEval));
 suites.push(await timed("injection", runInjectionEval));
 suites.push(await timed("isolation", runIsolationEval));
+suites.push(await timed("retrieval", runRetrievalEval));
 suites.push(await timed("scenario", runScenarioEval));
 suites.push(await timed("memory-audit", runMemoryAuditEval));
 if (live) suites.push(await timed("live", runLiveEval));

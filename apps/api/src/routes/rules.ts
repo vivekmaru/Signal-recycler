@@ -2,8 +2,10 @@ import { type FastifyInstance } from "fastify";
 import {
   createManualMemoryRequestSchema,
   createManualRuleRequestSchema,
-  createSyncedMemoryRequestSchema
+  createSyncedMemoryRequestSchema,
+  memoryRetrievalRequestSchema
 } from "@signal-recycler/shared";
+import { retrieveRelevantMemories } from "../services/memoryRetrieval.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
 
@@ -70,6 +72,29 @@ export async function registerRuleRoutes(
   });
 
   app.get("/api/rules", async () => options.store.listRules(projectId));
+
+  app.post("/api/memory/retrieve", async (request, reply) => {
+    const parsed = memoryRetrievalRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "Invalid memory retrieval request",
+        message: parsed.error.issues.map((issue) => issue.message).join("; ")
+      });
+    }
+
+    const result = retrieveRelevantMemories({
+      store: options.store,
+      projectId,
+      query: parsed.data.prompt,
+      limit: parsed.data.limit
+    });
+    return {
+      query: result.query,
+      selected: result.selected,
+      skipped: result.skipped,
+      metrics: result.metrics
+    };
+  });
 
   app.post("/api/rules", async (request, reply) => {
     const parsed = createManualRuleRequestSchema.parse(request.body ?? {});

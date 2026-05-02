@@ -12,15 +12,15 @@ What exists today is a Codex-focused memory and compression proxy:
 - It compresses noisy Responses API input items.
 - It stores sessions, events, and playbook rules in SQLite.
 - It extracts reusable rule candidates from turns.
-- It injects approved rules back into future Codex requests.
+- It retrieves relevant approved rules and injects selected rules back into future Codex requests.
 
 What does not exist yet:
 
 - A live repo state graph.
 - Dead-code or stale-documentation detection.
 - Repository-wide source indexing.
-- Just-in-time rehydration from a vector, FTS, or graph store.
-- Objective evals proving that injected memory improves agent outcomes beyond the demo fixture.
+- Just-in-time repo/source rehydration from a vector, FTS, or graph store.
+- Live agent evals proving broad outcome gains beyond deterministic fixtures.
 
 The divergence is meaningful, not fatal. The strongest product direction is not "repo janitor that cleans everything"; it is a local-first memory runtime and context control plane for coding agents and agentic apps. That framing preserves the original insight while matching the code that already works.
 
@@ -114,11 +114,11 @@ Accurate claims:
 - Local OpenAI-compatible proxy exists.
 - Codex SDK runner points at the local proxy.
 - Compression exists for large noisy Responses API `input` items.
-- Approved playbook rule injection exists.
+- Retrieval-backed approved playbook rule injection exists on the Phase 3 branch.
 - Manual rule creation exists.
 - LLM classifier plus heuristic fallback exists.
 - SQLite persistence exists.
-- Dashboard shows events, rules, compression, and token-saving metrics.
+- Dashboard shows events, rules, retrieval decisions, compression, and token-saving metrics.
 - Codex CLI provider installer exists.
 - Mock Codex mode exists.
 
@@ -319,6 +319,10 @@ Success criteria:
 ### Phase 3: Retrieval Before More Memory Creation
 
 The current app can create rules but cannot select among them well. Injection should become scoped and relevant.
+
+Implementation plan: `docs/superpowers/plans/2026-05-02-phase-3-memory-retrieval.md`
+
+Current status: PR in progress on `phase-3-memory-retrieval`. The branch adds shared retrieval schemas, a SQLite FTS5/BM25 memory index over approved local memories, `POST /api/memory/retrieve`, retrieval before proxy and mock Codex injection, retrieval audit events, and deterministic retrieval evals. It is not yet marked merged or shipped.
 
 Success criteria:
 
