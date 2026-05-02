@@ -17,7 +17,6 @@ export type ProcessTurnInput = {
   sessionId: string;
   prompt: string;
   adapter?: AgentAdapterId;
-  agentAdapter?: AgentAdapter;
   agentAdapterRegistry?: AgentAdapterRegistry;
   workingDirectory?: string;
   classifyTitle?: string;
@@ -108,10 +107,6 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
 async function runTurn(
   input: ProcessTurnInput
 ): Promise<AgentRunResult> {
-  if (input.agentAdapter) {
-    return runAgentAdapter(input, input.agentAdapter);
-  }
-
   if (input.agentAdapterRegistry) {
     return runAgentAdapter(input, input.agentAdapterRegistry.resolve(input.adapter ?? "default"));
   }
