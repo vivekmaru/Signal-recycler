@@ -1,3 +1,4 @@
+import { type CandidateRule, type MemoryRecord } from "@signal-recycler/shared";
 import { classifyTurn } from "../classifier.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
@@ -45,7 +46,12 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
     metadata: classification
   });
 
-  const candidateRules = classification.candidateRules.map((candidate) => {
+  const approvedMemories = input.store.listApprovedRules(input.projectId);
+  const newCandidates = classification.candidateRules.filter(
+    (candidate) => !isCoveredByApprovedMemory(candidate, approvedMemories)
+  );
+
+  const candidateRules = newCandidates.map((candidate) => {
     let rule = input.store.createRuleCandidate({
       projectId: input.projectId,
       category: candidate.category,
@@ -91,4 +97,40 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
   });
 
   return { finalResponse: turn.finalResponse, items: turn.items, candidateRules };
+}
+
+function isCoveredByApprovedMemory(candidate: CandidateRule, memories: MemoryRecord[]): boolean {
+  const candidateRule = normalizeMemoryText(candidate.rule);
+  const candidateReason = normalizeMemoryText(candidate.reason);
+  const candidateCorrection = commandCorrection(candidate.rule);
+
+  return memories.some((memory) => {
+    const memoryRule = normalizeMemoryText(memory.rule);
+    if (candidateRule === memoryRule) return true;
+    if (candidateReason.includes(memoryRule)) return true;
+
+    const memoryCorrection = commandCorrection(memory.rule);
+    return (
+      candidateCorrection !== null &&
+      memoryCorrection !== null &&
+      candidateCorrection.preferred === memoryCorrection.preferred &&
+      candidateCorrection.rejected === memoryCorrection.rejected
+    );
+  });
+}
+
+function normalizeMemoryText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[`'"]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function commandCorrection(value: string): { preferred: string; rejected: string } | null {
+  const match = normalizeMemoryText(value).match(
+    /\buse\s+(\w[\w.-]*)(?:\s+\w[\w.-]*)?\s+instead\s+of\s+(\w[\w.-]*)/
+  );
+  if (!match?.[1] || !match[2]) return null;
+  return { preferred: match[1], rejected: match[2] };
 }

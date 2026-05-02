@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
+import { renderPlaybookBlock } from "./playbook.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
 
@@ -219,6 +220,51 @@ describe("api", () => {
     expect(candidate.confidence).toBe("high");
     expect(events.json().map((event: { category: string }) => event.category)).toEqual(
       expect.arrayContaining(["codex_event", "classifier_result", "rule_candidate"])
+    );
+  });
+
+  it("does not create duplicate memory from injected memory echoed by the run", async () => {
+    delete process.env.OPENAI_API_KEY;
+    const store = createStore(":memory:");
+    const existing = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({
+          finalResponse:
+            "Checking learned constraints from playbook... Use pnpm test instead of npm test. Applying rules before proceeding.",
+          items: [{ type: "mock", injected: true }]
+        })
+      }
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const run = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: { prompt: "Run package manager validation for this repo." }
+    });
+    const events = await app.inject({ method: "GET", url: `/api/sessions/${id}/events` });
+
+    expect(run.statusCode).toBe(200);
+    expect(run.json().candidateRules).toEqual([]);
+    expect(store.listRules(TEST_APP_OPTIONS.projectId).map((rule) => rule.id)).toEqual([
+      existing.id
+    ]);
+    expect(events.json().map((event: { category: string }) => event.category)).not.toContain(
+      "rule_candidate"
+    );
+    expect(events.json().map((event: { category: string }) => event.category)).not.toContain(
+      "rule_auto_approved"
     );
   });
 
@@ -806,6 +852,276 @@ describe("api", () => {
     });
     expect(store.listMemoryUsages(relevant.id)).toHaveLength(1);
     expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
+  });
+
+  it("does not retrieve from an existing injected playbook on proxy requests", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const unrelated = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens for UI theme changes.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-existing-playbook"
+      },
+      payload: JSON.stringify({
+        input: [
+          {
+            type: "message",
+            role: "system",
+            content: renderPlaybookBlock([relevant, unrelated])
+          },
+          {
+            type: "message",
+            role: "user",
+            content: "Run package manager validation for this repo."
+          }
+        ]
+      })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-existing-playbook");
+    const retrievalEvent = events.find((event) => event.category === "memory_retrieval");
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input[0].content).toContain("Use pnpm test instead of npm test.");
+    expect(forwardedBody.input[0].content).not.toContain(
+      "Use approved theme tokens for UI theme changes."
+    );
+    expect(retrievalEvent?.metadata).toMatchObject({
+      query: "Run package manager validation for this repo.",
+      selected: [expect.objectContaining({ memoryId: relevant.id })],
+      skipped: [expect.objectContaining({ memoryId: unrelated.id })],
+      metrics: expect.objectContaining({ selectedMemories: 1, skippedMemories: 1 })
+    });
+    expect(memoryEvent?.metadata).toMatchObject({
+      memoryIds: [relevant.id],
+      retrieval: expect.objectContaining({
+        metrics: expect.objectContaining({ selectedMemories: 1, skippedMemories: 1 })
+      })
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(1);
+    expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
+  });
+
+  it("does not retrieve or inject memory into internal classifier proxy requests", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens for UI theme changes.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const classifierBody = {
+      model: "gpt-5.1-mini",
+      input: [
+        {
+          role: "system",
+          content: "Classify this Codex turn for Signal Recycler."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            prompt: "Run package manager validation for this repo.",
+            finalResponse:
+              "Checking learned constraints from playbook... Use pnpm test instead of npm test.",
+            items: [{ injectedPrompt: renderPlaybookBlock(store.listApprovedRules(TEST_APP_OPTIONS.projectId)) }]
+          })
+        }
+      ],
+      text: {
+        format: {
+          name: "signal_recycler_classifier"
+        }
+      }
+    };
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-classifier"
+      },
+      payload: JSON.stringify(classifierBody)
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-classifier");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody).toEqual(classifierBody);
+    expect(events.some((event) => event.category === "memory_retrieval")).toBe(false);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
+      internalSignalRecyclerRequest: true,
+      injectedRules: 0
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(0);
+  });
+
+  it("detects internal classifier proxy requests by prompt marker without schema metadata", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const classifierBody = {
+      model: "gpt-5.1-mini",
+      input: [
+        {
+          role: "system",
+          content: "Classify this Codex turn for Signal Recycler."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            prompt: "Run package manager validation for this repo.",
+            finalResponse: "Use pnpm test instead of npm test."
+          })
+        }
+      ]
+    };
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-classifier-marker"
+      },
+      payload: JSON.stringify(classifierBody)
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-classifier-marker");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody).toEqual(classifierBody);
+    expect(events.some((event) => event.category === "memory_retrieval")).toBe(false);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
+      internalSignalRecyclerRequest: true,
+      injectedRules: 0
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(0);
+  });
+
+  it("does not treat user-quoted classifier marker text as an internal request", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const body = {
+      input: [
+        {
+          role: "user",
+          content:
+            "Debug this proxy text: Classify this Codex turn for Signal Recycler. Then run package manager validation."
+        }
+      ]
+    };
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-user-marker-quote"
+      },
+      payload: JSON.stringify(body)
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-user-marker-quote");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input[0].content).toContain("Use pnpm test instead of npm test.");
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      metrics: expect.objectContaining({ selectedMemories: 1 })
+    });
+    expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
+      internalSignalRecyclerRequest: false,
+      injectedRules: 1
+    });
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(1);
   });
 
   it("does not inject all approved memories when proxy retrieval selects nothing", async () => {

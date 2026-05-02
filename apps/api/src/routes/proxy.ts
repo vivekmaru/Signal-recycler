@@ -1,6 +1,6 @@
 import { type FastifyInstance } from "fastify";
 import { compressRequestBody } from "../compressor.js";
-import { injectIntoRequestBody } from "../playbook.js";
+import { injectIntoRequestBody, stripPlaybookBlocks } from "../playbook.js";
 import { recordMemoryInjection } from "../services/memoryInjection.js";
 import { retrieveRelevantMemories } from "../services/memoryRetrieval.js";
 import { type SignalRecyclerStore } from "../store.js";
@@ -32,10 +32,11 @@ export async function registerProxyRoutes(
     const originalItems = countInputItems(request.body);
 
     let rawBody = request.body;
+    const internalSignalRecyclerRequest = isSignalRecyclerInternalRequest(rawBody);
     let charsRemoved = 0;
     let tokensRemoved = 0;
     let compressions = 0;
-    if (rawBody && request.method === "POST") {
+    if (rawBody && request.method === "POST" && !internalSignalRecyclerRequest) {
       const { body: compressed, result } = compressRequestBody(rawBody);
       if (result && result.charsRemoved > 0) {
         rawBody = compressed;
@@ -59,7 +60,7 @@ export async function registerProxyRoutes(
 
     const retrievalQuery = extractProxyQueryText(rawBody);
     const retrieval =
-      rules.length > 0 && retrievalQuery.length > 0
+      !internalSignalRecyclerRequest && rules.length > 0 && retrievalQuery.length > 0
         ? retrieveRelevantMemories({
             store: options.store,
             projectId: options.projectId,
@@ -105,7 +106,8 @@ export async function registerProxyRoutes(
         finalItems,
         compressions,
         tokensRemoved,
-        injectedRules
+        injectedRules,
+        internalSignalRecyclerRequest
       }),
       metadata: {
         projectId: options.projectId,
@@ -119,6 +121,7 @@ export async function registerProxyRoutes(
         charsRemoved,
         tokensRemoved,
         injectedRules,
+        internalSignalRecyclerRequest,
         ruleIds: injection.injected ? selectedRules.map((r) => r.id) : [],
         retrieval: retrieval
           ? {
@@ -222,9 +225,14 @@ function buildProxyRequestSummary(input: {
   compressions: number;
   tokensRemoved: number;
   injectedRules: number;
+  internalSignalRecyclerRequest: boolean;
 }): string {
   const lines: string[] = [];
   lines.push(`${input.method} ${input.tail}`);
+  if (input.internalSignalRecyclerRequest) {
+    lines.push("Forwarded unchanged (Signal Recycler internal request).");
+    return lines.join("\n");
+  }
   if (input.originalSize > 0) {
     const delta = input.finalSize - input.originalSize;
     const sign = delta >= 0 ? "+" : "";
@@ -279,25 +287,81 @@ function extractProxyQueryText(body: unknown): string {
   }
   if (!isPlainObject(body)) return "";
 
-  const parts = [
-    extractText((body as Record<string, unknown>).instructions),
-    extractText((body as Record<string, unknown>).input),
-    extractText((body as Record<string, unknown>).messages)
+  const record = body as Record<string, unknown>;
+  const promptParts = [
+    extractUserText(record.input),
+    extractUserText(record.messages)
   ].filter((part) => part.length > 0);
 
-  return parts.join("\n\n");
+  if (promptParts.length > 0) return promptParts.join("\n\n");
+  return extractPlainText(record.instructions);
 }
 
-function extractText(value: unknown): string {
-  if (typeof value === "string") return value.trim();
+function isSignalRecyclerInternalRequest(body: unknown): boolean {
+  if (!isPlainObject(body)) return false;
+
+  if (hasSignalRecyclerClassifierSchema(body)) return true;
+  return (
+    hasClassifierPromptMarker(body.input) ||
+    hasClassifierPromptMarker(body.messages)
+  );
+}
+
+function hasSignalRecyclerClassifierSchema(body: Record<string, unknown>): boolean {
+  const textFormat = body.text;
+  if (!isPlainObject(textFormat)) return false;
+  const format = textFormat.format;
+  if (!isPlainObject(format)) return false;
+  return format.name === "signal_recycler_classifier";
+}
+
+function hasClassifierPromptMarker(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasClassifierPromptMarker);
+  if (!isPlainObject(value)) return false;
+
+  const role = typeof value.role === "string" ? value.role.toLowerCase() : null;
+  if (role !== "system" && role !== "developer") return false;
+
+  const text = [extractPlainText(value.text), extractPlainText(value.content)]
+    .filter((part) => part.length > 0)
+    .join("\n");
+  return text.includes("Classify this Codex turn for Signal Recycler.");
+}
+
+function extractUserText(value: unknown): string {
+  if (typeof value === "string") return cleanRetrievalText(value);
   if (Array.isArray(value)) {
-    return value.map(extractText).filter((part) => part.length > 0).join("\n");
+    return value.map(extractUserText).filter((part) => part.length > 0).join("\n");
   }
   if (!isPlainObject(value)) return "";
 
-  const text = extractText(value.text);
-  const content = extractText(value.content);
+  const role = typeof value.role === "string" ? value.role.toLowerCase() : null;
+  if (role && role !== "user") return "";
+
+  const text = extractUserText(value.text);
+  const content = extractUserText(value.content);
   return [text, content].filter((part) => part.length > 0).join("\n");
+}
+
+function extractPlainText(value: unknown): string {
+  if (typeof value === "string") return cleanRetrievalText(value);
+  if (Array.isArray(value)) {
+    return value.map(extractPlainText).filter((part) => part.length > 0).join("\n");
+  }
+  if (!isPlainObject(value)) return "";
+
+  const parts = [
+    extractPlainText(value.instructions),
+    extractPlainText(value.input),
+    extractPlainText(value.messages),
+    extractPlainText(value.text),
+    extractPlainText(value.content)
+  ];
+  return parts.filter((part) => part.length > 0).join("\n");
+}
+
+function cleanRetrievalText(value: string): string {
+  return stripPlaybookBlocks(value).trim();
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

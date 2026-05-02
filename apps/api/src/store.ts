@@ -329,7 +329,10 @@ export function createStore(path: string) {
                  AND earlier.rule = rules.rule
                  AND (
                    earlier.approved_at < rules.approved_at
-                   OR (earlier.approved_at = rules.approved_at AND earlier.id < rules.id)
+                   OR (
+                     earlier.approved_at = rules.approved_at
+                     AND earlier.rowid < rules.rowid
+                   )
                  )
              )
            ORDER BY search_score ASC, approved_at ASC, id ASC

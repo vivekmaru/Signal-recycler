@@ -79,7 +79,7 @@ export function injectIntoRequestBody(body: unknown, rules: RuleLike[]): unknown
 }
 
 function injectIntoText(text: string, rules: RuleLike[]): string {
-  const cleaned = removeExistingPlaybook(text).trimStart();
+  const cleaned = stripPlaybookBlocks(text).trimStart();
   const block = renderPlaybookBlock(rules);
   return `${block}\n\n${cleaned}`.trim();
 }
@@ -94,11 +94,14 @@ function injectIntoMessages(messages: unknown[], rules: RuleLike[]): unknown[] {
   return [{ role: "system", content: block }, ...withoutExisting];
 }
 
-function removeExistingPlaybook(text: string): string {
-  const start = text.indexOf(PLAYBOOK_START);
-  const end = text.indexOf(PLAYBOOK_END);
-  if (start === -1 || end === -1 || end < start) return text;
-  return `${text.slice(0, start)}${text.slice(end + PLAYBOOK_END.length)}`;
+export function stripPlaybookBlocks(text: string): string {
+  let cleaned = text;
+  while (true) {
+    const start = cleaned.indexOf(PLAYBOOK_START);
+    const end = cleaned.indexOf(PLAYBOOK_END);
+    if (start === -1 || end === -1 || end < start) return cleaned;
+    cleaned = `${cleaned.slice(0, start)}${cleaned.slice(end + PLAYBOOK_END.length)}`;
+  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
