@@ -47,6 +47,7 @@ The fix prevents candidate rule creation when the candidate is already covered b
   - Asserts only the user-prompt-relevant memory is reinjected.
   - Adds a regression test for classifier-shaped proxy requests.
   - Asserts internal classifier requests do not create retrieval or injection events.
+  - Adds coverage for classifier requests where the marker appears in `input[].content` without schema metadata.
 
 ## Reviewer Focus Areas
 
@@ -67,7 +68,7 @@ The fix prevents candidate rule creation when the candidate is already covered b
 ## Verification
 
 - `pnpm --filter @signal-recycler/api test -- server.test.ts store.test.ts`
-  - Passed: 13 files, 106 tests.
+  - Passed: 13 files, 107 tests.
 - `pnpm --filter @signal-recycler/api type-check`
   - Passed.
 - Manual local API smoke on port `3002`

@@ -1008,6 +1008,67 @@ describe("api", () => {
     expect(store.listMemoryUsages(relevant.id)).toHaveLength(0);
   });
 
+  it("detects internal classifier proxy requests by prompt marker without schema metadata", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const classifierBody = {
+      model: "gpt-5.1-mini",
+      input: [
+        {
+          role: "system",
+          content: "Classify this Codex turn for Signal Recycler."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            prompt: "Run package manager validation for this repo.",
+            finalResponse: "Use pnpm test instead of npm test."
+          })
+        }
+      ]
+    };
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-classifier-marker"
+      },
+      payload: JSON.stringify(classifierBody)
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-classifier-marker");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody).toEqual(classifierBody);
+    expect(events.some((event) => event.category === "memory_retrieval")).toBe(false);
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
+      internalSignalRecyclerRequest: true,
+      injectedRules: 0
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(0);
+  });
+
   it("does not inject all approved memories when proxy retrieval selects nothing", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ ok: true }), { status: 200 })

@@ -331,9 +331,14 @@ function extractPlainText(value: unknown): string {
   }
   if (!isPlainObject(value)) return "";
 
-  const text = extractPlainText(value.text);
-  const content = extractPlainText(value.content);
-  return [text, content].filter((part) => part.length > 0).join("\n");
+  const parts = [
+    extractPlainText(value.instructions),
+    extractPlainText(value.input),
+    extractPlainText(value.messages),
+    extractPlainText(value.text),
+    extractPlainText(value.content)
+  ];
+  return parts.filter((part) => part.length > 0).join("\n");
 }
 
 function cleanRetrievalText(value: string): string {
