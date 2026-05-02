@@ -243,6 +243,7 @@ The dashboard is the main product surface:
 | `POST` | `/api/rules/:id/approve` | Approve a candidate rule. |
 | `POST` | `/api/rules/:id/reject` | Reject a candidate rule. |
 | `GET` | `/api/playbook/export` | Export approved rules as Markdown. |
+| `POST` | `/api/memory/retain` | Retain an approved memory from an integration. |
 | `POST` | `/api/memory/retrieve` | Preview which memories would be selected for a prompt. |
 | `POST` | `/api/memory/reset` | Clear local demo memory for the current project. |
 | `POST` | `/proxy/*` | Proxy OpenAI-compatible Codex traffic. |
@@ -253,6 +254,10 @@ The dashboard is the main product surface:
 - `POST /api/memories`: create and approve a manual memory.
 - `POST /api/memories/synced`: import a memory from an `AGENTS.md` or `CLAUDE.md` compatibility block.
 - `GET /api/memories/:id/audit`: return the memory plus usage rows showing where it was injected.
+
+Stable memory service APIs for integrations:
+
+- `POST /api/memory/retain`: retain an approved durable memory for the current project. Memories retained through this endpoint use source `{ "kind": "import", "label": "api" }`.
 - `POST /api/memory/retrieve`: preview the approved memories retrieval would select or skip for a prompt. This is a local retrieval preview, not repo indexing or vector search.
 
 Manual memory request:
@@ -262,6 +267,18 @@ Manual memory request:
   "category": "tooling",
   "rule": "Use pnpm for package management in this repository.",
   "reason": "The workspace lockfile and scripts are managed with pnpm.",
+  "memoryType": "command_convention",
+  "scope": { "type": "project", "value": null }
+}
+```
+
+Integration retain request:
+
+```json
+{
+  "category": "package-manager",
+  "rule": "Use pnpm test instead of npm test.",
+  "reason": "External integration retained this memory.",
   "memoryType": "command_convention",
   "scope": { "type": "project", "value": null }
 }

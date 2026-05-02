@@ -96,6 +96,23 @@ export async function registerRuleRoutes(
     };
   });
 
+  app.post("/api/memory/retain", async (request) => {
+    const parsed = createManualMemoryRequestSchema.parse(request.body ?? {});
+    const memory = options.store.createRuleCandidate({
+      projectId,
+      category: parsed.category,
+      rule: parsed.rule,
+      reason: parsed.reason,
+      memoryType: parsed.memoryType,
+      scope: parsed.scope,
+      source: { kind: "import", label: "api" },
+      confidence: "high",
+      syncStatus: "imported",
+      sourceEventId: null
+    });
+    return options.store.approveRule(memory.id);
+  });
+
   app.post("/api/rules", async (request, reply) => {
     const parsed = createManualRuleRequestSchema.parse(request.body ?? {});
     if (parsed.memoryType !== "rule") {
