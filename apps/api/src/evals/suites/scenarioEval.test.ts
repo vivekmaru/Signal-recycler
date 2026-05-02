@@ -30,7 +30,7 @@ describe("scenario eval", () => {
 
     const result = await runScenarioEval();
 
-    expect(result.status).toBe("warn");
+    expect(result.status).toBe("pass");
     expect(process.env.OPENAI_API_KEY).toBe("sk-test-present-in-dev-shell");
     expect(fetch).not.toHaveBeenCalled();
   });

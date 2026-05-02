@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { injectPlaybookRules } from "../../playbook.js";
+import { retrieveRelevantMemories } from "../../services/memoryRetrieval.js";
 import { processTurn } from "../../services/turnProcessor.js";
 import { createStore } from "../../store.js";
 import { metric, suiteResult } from "../report.js";
@@ -40,6 +41,34 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
   const taskSuccessDelta = Number(withMemory.passed) - Number(withoutMemory.passed);
   const candidateRulePrecision = firstRule?.rule.includes("pnpm") ? 1 : 0;
   const tokensAddedByMemory = Math.round((String(withMemoryPrompt).length - prompt.length) / 4);
+  const currentRule = store.approveRule(
+    store.createRuleCandidate({
+      projectId,
+      category: "validation",
+      rule: "Use pnpm test for validation.",
+      reason: "Current project convention."
+    }).id
+  );
+  const staleRule = store.approveRule(
+    store.createRuleCandidate({
+      projectId,
+      category: "validation",
+      rule: "Use npm test for validation.",
+      reason: "Old convention."
+    }).id
+  );
+  store.supersedeRule(staleRule.id, currentRule.id);
+  const staleMemoryRetrieval = retrieveRelevantMemories({
+    store,
+    projectId,
+    query: "validate tests with package manager",
+    limit: 5
+  });
+  const staleMemoryFailures = staleMemoryRetrieval.selected.some(
+    (decision) => decision.memoryId === staleRule.id
+  )
+    ? 1
+    : 0;
 
   return suiteResult({
     id: "scenario",
@@ -65,20 +94,21 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
       },
       {
         id: "scenario.stale-memory-exposure",
-        title: "Reports stale-memory failure surface",
-        status: "warn",
-        summary:
-          "Current runtime injects approved rules without retrieval or supersession, so stale-rule rejection is a known Phase 3 gap.",
-        metrics: [metric("stale_memory_failures", 1, "failures")],
+        title: "Retrieval skips superseded stale memory",
+        status: staleMemoryFailures === 0 ? "pass" : "fail",
+        summary: `stale_memory_failures=${staleMemoryFailures}`,
+        metrics: [metric("stale_memory_failures", staleMemoryFailures, "failures")],
         details: {
-          reason: "No superseded_by or contradiction status exists in the Phase 1 data model."
+          staleMemoryId: staleRule.id,
+          replacementMemoryId: currentRule.id,
+          selected: staleMemoryRetrieval.selected
         }
       }
     ],
     metrics: [
       metric("task_success_delta", taskSuccessDelta, "count"),
       metric("tokens_added_by_memory", tokensAddedByMemory, "tokens"),
-      metric("stale_memory_failures", 1, "failures")
+      metric("stale_memory_failures", staleMemoryFailures, "failures")
     ]
   });
 }
