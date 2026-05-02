@@ -331,6 +331,34 @@ describe("api", () => {
     });
   });
 
+  it("returns 400 for malformed memory retain requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retain",
+      payload: {
+        category: "package-manager",
+        rule: "short",
+        reason: "External integration retained this memory.",
+        memoryType: "command_convention",
+        scope: { type: "project", value: null }
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memory retain request",
+      message: expect.any(String)
+    });
+  });
+
   it("creates synced memories with synced file provenance", async () => {
     const store = createStore(":memory:");
     const app = await createApp({

@@ -96,15 +96,22 @@ export async function registerRuleRoutes(
     };
   });
 
-  app.post("/api/memory/retain", async (request) => {
-    const parsed = createManualMemoryRequestSchema.parse(request.body ?? {});
+  app.post("/api/memory/retain", async (request, reply) => {
+    const parsed = createManualMemoryRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "Invalid memory retain request",
+        message: parsed.error.issues.map((issue) => issue.message).join("; ")
+      });
+    }
+
     const memory = options.store.createRuleCandidate({
       projectId,
-      category: parsed.category,
-      rule: parsed.rule,
-      reason: parsed.reason,
-      memoryType: parsed.memoryType,
-      scope: parsed.scope,
+      category: parsed.data.category,
+      rule: parsed.data.rule,
+      reason: parsed.data.reason,
+      memoryType: parsed.data.memoryType,
+      scope: parsed.data.scope,
       source: { kind: "import", label: "api" },
       confidence: "high",
       syncStatus: "imported",
