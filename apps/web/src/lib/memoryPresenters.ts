@@ -29,6 +29,14 @@ export function memoryScopeLabel(memory: MemoryRecord): string {
   return memory.scope.value ? `${memory.scope.type}:${memory.scope.value}` : memory.scope.type;
 }
 
+export function memoryStatusLabel(memory: MemoryRecord): string {
+  return memory.supersededBy ? "superseded" : memory.status;
+}
+
+export function memoryTypeLabel(memory: MemoryRecord): string {
+  return memory.memoryType.replaceAll("_", " ");
+}
+
 export function confidenceValue(memory: MemoryRecord): number {
   if (memory.confidence === "high") return 0.9;
   if (memory.confidence === "medium") return 0.7;

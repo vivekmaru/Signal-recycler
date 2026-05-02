@@ -7,6 +7,7 @@ import { useDashboardData } from "./hooks/useDashboardData";
 import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
 import { DashboardView } from "./views/DashboardView";
+import { MemoryView } from "./views/MemoryView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { SessionsView } from "./views/SessionsView";
 
@@ -127,7 +128,7 @@ export function App() {
         if (!newSessionRunning) setNewSessionOpen(true);
       }}
     >
-      <section className={route === "session" ? "" : "p-6"}>
+      <section className={route === "session" || route === "memory" ? "" : "p-6"}>
         {data.error ? <ErrorBanner message={data.error} onDismiss={() => data.setError(null)} /> : null}
         {data.loading ? (
           <div className="rounded-md border border-stone-200 bg-white p-4 text-sm text-stone-500">
@@ -169,7 +170,8 @@ export function App() {
                 session={selectedSession}
               />
             ) : null}
-            {route !== "dashboard" && route !== "sessions" && route !== "session" ? (
+            {route === "memory" ? <MemoryView memories={data.memories} onChanged={data.refresh} /> : null}
+            {route !== "dashboard" && route !== "sessions" && route !== "session" && route !== "memory" ? (
               <RoutePlaceholder
                 route={route}
                 selectedSession={selectedSession}
@@ -209,13 +211,9 @@ function RoutePlaceholder({
   route: AppRoute;
   selectedSession: SessionRecord | null;
 }) {
-  if (route === "dashboard" || route === "sessions" || route === "session") return null;
+  if (route === "dashboard" || route === "sessions" || route === "session" || route === "memory") return null;
 
-  const copy: Record<Exclude<AppRoute, "dashboard" | "sessions" | "session">, { title: string; body: string }> = {
-    memory: {
-      title: "Memory review placeholder",
-      body: "Memory records are loaded for navigation counts. The review table and provenance inspector arrive in the memory view task."
-    },
+  const copy: Record<Exclude<AppRoute, "dashboard" | "sessions" | "session" | "memory">, { title: string; body: string }> = {
     context: {
       title: "Context Index preview",
       body: "No source index, embeddings, reranking, or vector retrieval UI is implemented in this phase task."

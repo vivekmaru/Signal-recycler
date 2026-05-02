@@ -1,6 +1,6 @@
 import type { InspectorSelection } from "../types";
 import { formatDateTime } from "../lib/format";
-import { memoryScopeLabel, memorySourceLabel } from "../lib/memoryPresenters";
+import { memoryScopeLabel, memorySourceLabel, memoryStatusLabel, memoryTypeLabel } from "../lib/memoryPresenters";
 import { Badge, type BadgeTone } from "./Badge";
 import { Button } from "./Button";
 
@@ -115,8 +115,8 @@ function MemoryInspector({ selection }: { selection: Extract<InspectorSelection,
       <section>
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Memory</div>
         <div className="flex flex-wrap gap-2">
-          <Badge tone={memoryStatusTone(selection.memory.status)}>{selection.memory.status}</Badge>
-          <Badge>{selection.memory.memoryType.replaceAll("_", " ")}</Badge>
+          <Badge tone={memoryStatusTone(selection.memory)}>{memoryStatusLabel(selection.memory)}</Badge>
+          <Badge>{memoryTypeLabel(selection.memory)}</Badge>
           <Badge>{selection.memory.syncStatus}</Badge>
         </div>
         <p className="mt-3 whitespace-pre-wrap break-words font-medium leading-6 text-stone-950">
@@ -140,8 +140,8 @@ function MemoryInspector({ selection }: { selection: Extract<InspectorSelection,
         </dl>
       </section>
       <section className="rounded-md border border-dashed border-stone-300 bg-stone-50 p-4 text-stone-500">
-        Usage audit history is not loaded in this session inspector. The memory review task will attach the full
-        provenance/audit panel.
+        This inspector shows the durable memory record properties. The Memory view usage panel shows recorded local
+        injection usage when it exists.
       </section>
     </>
   );
@@ -154,8 +154,9 @@ function selectionTitle(selection: InspectorSelection): string {
   return "Nothing selected";
 }
 
-function memoryStatusTone(status: Extract<InspectorSelection, { type: "memory" }>["memory"]["status"]): BadgeTone {
-  if (status === "approved") return "green";
-  if (status === "pending") return "amber";
+function memoryStatusTone(memory: Extract<InspectorSelection, { type: "memory" }>["memory"]): BadgeTone {
+  if (memory.supersededBy) return "purple";
+  if (memory.status === "approved") return "green";
+  if (memory.status === "pending") return "amber";
   return "red";
 }

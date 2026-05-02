@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryRecord } from "@signal-recycler/shared";
-import { countMemoriesByStatus, memorySourceLabel } from "./memoryPresenters";
+import { countMemoriesByStatus, memorySourceLabel, memoryStatusLabel, memoryTypeLabel } from "./memoryPresenters";
 
 function memory(id: string, status: MemoryRecord["status"], source: MemoryRecord["source"]): MemoryRecord {
   return {
@@ -39,5 +39,32 @@ describe("memory presenters", () => {
     expect(memorySourceLabel({ kind: "manual", author: "local-user" })).toBe("manual");
     expect(memorySourceLabel({ kind: "import", label: "api" })).toBe("api import");
     expect(memorySourceLabel({ kind: "synced_file", path: "AGENTS.md", section: null })).toBe("AGENTS.md");
+  });
+
+  it("formats memory status labels with superseded records as their own review bucket", () => {
+    expect(memoryStatusLabel(memory("approved", "approved", { kind: "manual", author: "local-user" }))).toBe(
+      "approved"
+    );
+    expect(
+      memoryStatusLabel({
+        ...memory("old", "approved", { kind: "manual", author: "local-user" }),
+        supersededBy: "new"
+      })
+    ).toBe("superseded");
+  });
+
+  it("formats memory type labels for review surfaces", () => {
+    expect(
+      memoryTypeLabel({
+        ...memory("command", "approved", { kind: "manual", author: "local-user" }),
+        memoryType: "command_convention"
+      })
+    ).toBe("command convention");
+    expect(
+      memoryTypeLabel({
+        ...memory("source", "approved", { kind: "manual", author: "local-user" }),
+        memoryType: "source_derived"
+      })
+    ).toBe("source derived");
   });
 });
