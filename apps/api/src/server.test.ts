@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
 import { renderPlaybookBlock } from "./playbook.js";
+import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
 
@@ -297,6 +299,63 @@ describe("api", () => {
       memoryType: "command_convention",
       source: { kind: "manual", author: "local-user" },
       syncStatus: "local"
+    });
+  });
+
+  it("retains integration memories with api import provenance", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retain",
+      payload: {
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "External integration retained this memory.",
+        memoryType: "command_convention",
+        scope: { type: "project", value: null }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "approved",
+      source: { kind: "import", label: "api" }
+    });
+  });
+
+  it("returns 400 for malformed memory retain requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retain",
+      payload: {
+        category: "package-manager",
+        rule: "short",
+        reason: "External integration retained this memory.",
+        memoryType: "command_convention",
+        scope: { type: "project", value: null }
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memory retain request",
+      message: expect.any(String)
     });
   });
 
@@ -704,6 +763,240 @@ describe("api", () => {
       message: expect.stringContaining("api.responses.write")
     });
     expect(events.some((event) => event.title === "Codex run failed")).toBe(true);
+  });
+
+  it("uses the mock adapter selected by the run request", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("default runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_sdk: {
+            id: "codex_sdk",
+            run: async () => {
+              throw new Error("codex sdk adapter should not be used");
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Run package manager validation for this repo.",
+        adapter: "mock"
+      }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().finalResponse).toContain("Encountered a failure");
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "codex_event",
+          title: "Codex response",
+          body: expect.stringContaining("Encountered a failure")
+        })
+      ])
+    );
+  });
+
+  it("keeps default mock-mode session runs on the Codex SDK adapter compatibility path", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const store = createStore(":memory:");
+    const rule = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const codexSdkAdapter = createCodexSdkAdapter({
+      store,
+      apiPort: 3001,
+      projectId: TEST_APP_OPTIONS.projectId,
+      workingDirectory: TEST_APP_OPTIONS.workingDirectory
+    });
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: codexSdkAdapter,
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: { codex_sdk: codexSdkAdapter }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: { prompt: "Please run package manager validation with pnpm." }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().finalResponse).toContain("Use pnpm for package scripts.");
+    expect(events.map((event) => event.category)).toEqual(
+      expect.arrayContaining(["proxy_request", "memory_retrieval", "memory_injection"])
+    );
+    expect(events.find((event) => event.category === "proxy_request")).toMatchObject({
+      title: "Codex SDK routed through proxy",
+      metadata: {
+        approvedRulesAvailable: 1,
+        workingDirectory: TEST_APP_OPTIONS.workingDirectory
+      }
+    });
+    expect(events.find((event) => event.category === "memory_injection")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "mock-codex",
+      reason: "approved_project_memory",
+      memoryIds: [rule.id],
+      retrieval: expect.objectContaining({
+        query: "Please run package manager validation with pnpm.",
+        metrics: expect.objectContaining({ selectedMemories: 1 })
+      })
+    });
+  });
+
+  it("uses the app-provided adapter registry for default session runs", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_sdk: {
+            id: "codex_sdk",
+            run: async () => ({
+              finalResponse: "registry adapter response",
+              items: [{ type: "registry" }]
+            })
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: { prompt: "Run through default registry adapter.", adapter: "default" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      finalResponse: "registry adapter response",
+      items: [{ type: "registry" }]
+    });
+  });
+
+  it("injects memory and working directory into configured Codex CLI adapter runs", async () => {
+    const store = createStore(":memory:");
+    const rule = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    let capturedPrompt = "";
+    let capturedWorkingDirectory: string | undefined;
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              capturedWorkingDirectory = input.workingDirectory;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Please run package manager validation with pnpm.",
+        adapter: "codex_cli"
+      }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("Use pnpm for package scripts.");
+    expect(capturedWorkingDirectory).toBe(TEST_APP_OPTIONS.workingDirectory);
+    expect(events.map((event) => event.category)).toEqual(
+      expect.arrayContaining(["memory_retrieval", "memory_injection"])
+    );
+    expect(events.find((event) => event.category === "memory_injection")?.metadata).toMatchObject({
+      adapter: "codex_cli",
+      memoryIds: [rule.id]
+    });
+  });
+
+  it("returns a clear error when the Codex CLI adapter is selected before configuration", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "default runner response", items: [] })
+      }
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Run package manager validation for this repo.",
+        adapter: "codex_cli"
+      }
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({
+      error: "Codex run failed",
+      message: "Agent adapter is not configured: codex_cli"
+    });
   });
 
   it("does not reject proxy requests before the handler when content-length is stale", async () => {

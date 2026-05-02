@@ -158,6 +158,7 @@ http://127.0.0.1:3001
 | `SIGNAL_RECYCLER_UPSTREAM_URL` | No | `https://api.openai.com` | Upstream OpenAI-compatible API target. Do not set this to the proxy URL. |
 | `SIGNAL_RECYCLER_LOG_LEVEL` | No | unset | Set to `info` or `error` when debugging server behavior. |
 | `SIGNAL_RECYCLER_MOCK_CODEX` | No | `0` | Set to `1` for UI-only demos without live Codex/OpenAI calls. |
+| `SIGNAL_RECYCLER_CODEX_CLI` | No | `0` | Set to `1` to enable the opt-in Codex CLI owned-session adapter. |
 | `SIGNAL_RECYCLER_LIVE_AGENT` | No | unset | Optional eval-only adapter selector for `pnpm eval:live`. Supported values: `codex`, `claude`. |
 | `SIGNAL_RECYCLER_LIVE_AGENT_TIMEOUT_MS` | No | `120000` | Timeout for the optional live agent eval. |
 
@@ -203,6 +204,22 @@ pnpm codex:uninstall
 
 The installer edits only a marked Signal Recycler block in `~/.codex/config.toml` and creates a backup the first time it modifies the file.
 
+### Codex CLI owned-session adapter
+
+The headless Codex CLI adapter is opt-in and is not the default run path:
+
+```bash
+SIGNAL_RECYCLER_CODEX_CLI=1 pnpm dev
+```
+
+Once enabled, run a session with an explicit adapter selection:
+
+```json
+{ "prompt": "Run validation.", "adapter": "codex_cli" }
+```
+
+This adapter shells out to the local `codex exec --json` command and uses your local Codex CLI authentication. The agent run does not require `OPENAI_API_KEY`, though the optional post-run classifier still uses `OPENAI_API_KEY` when configured.
+
 ## Dashboard
 
 The dashboard is the main product surface:
@@ -226,6 +243,7 @@ The dashboard is the main product surface:
 | `POST` | `/api/rules/:id/approve` | Approve a candidate rule. |
 | `POST` | `/api/rules/:id/reject` | Reject a candidate rule. |
 | `GET` | `/api/playbook/export` | Export approved rules as Markdown. |
+| `POST` | `/api/memory/retain` | Retain an approved memory from an integration. |
 | `POST` | `/api/memory/retrieve` | Preview which memories would be selected for a prompt. |
 | `POST` | `/api/memory/reset` | Clear local demo memory for the current project. |
 | `POST` | `/proxy/*` | Proxy OpenAI-compatible Codex traffic. |
@@ -236,6 +254,10 @@ The dashboard is the main product surface:
 - `POST /api/memories`: create and approve a manual memory.
 - `POST /api/memories/synced`: import a memory from an `AGENTS.md` or `CLAUDE.md` compatibility block.
 - `GET /api/memories/:id/audit`: return the memory plus usage rows showing where it was injected.
+
+Stable memory service APIs for integrations:
+
+- `POST /api/memory/retain`: retain an approved durable memory for the current project. Memories retained through this endpoint use source `{ "kind": "import", "label": "api" }`.
 - `POST /api/memory/retrieve`: preview the approved memories retrieval would select or skip for a prompt. This is a local retrieval preview, not repo indexing or vector search.
 
 Manual memory request:
@@ -245,6 +267,18 @@ Manual memory request:
   "category": "tooling",
   "rule": "Use pnpm for package management in this repository.",
   "reason": "The workspace lockfile and scripts are managed with pnpm.",
+  "memoryType": "command_convention",
+  "scope": { "type": "project", "value": null }
+}
+```
+
+Integration retain request:
+
+```json
+{
+  "category": "package-manager",
+  "rule": "Use pnpm test instead of npm test.",
+  "reason": "External integration retained this memory.",
   "memoryType": "command_convention",
   "scope": { "type": "project", "value": null }
 }

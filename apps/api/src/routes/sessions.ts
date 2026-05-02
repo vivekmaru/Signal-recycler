@@ -1,6 +1,7 @@
 import path from "node:path";
 import { type FastifyInstance } from "fastify";
 import { createSessionRequestSchema, runRequestSchema } from "@signal-recycler/shared";
+import { type createAgentAdapterRegistry } from "../services/agentAdapters.js";
 import { processTurn } from "../services/turnProcessor.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
@@ -11,6 +12,7 @@ export type RouteOptions = {
   projectId: string;
   workingDirectory: string;
   upstreamBaseUrl?: string;
+  agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
 };
 
 export async function registerSessionRoutes(
@@ -57,7 +59,10 @@ export async function registerSessionRoutes(
         codexRunner: options.codexRunner,
         projectId,
         sessionId: id,
-        prompt: parsed.prompt
+        prompt: parsed.prompt,
+        adapter: parsed.adapter,
+        workingDirectory,
+        ...(options.agentAdapterRegistry ? { agentAdapterRegistry: options.agentAdapterRegistry } : {})
       });
     } catch (error) {
       const message = (error as Error).message;

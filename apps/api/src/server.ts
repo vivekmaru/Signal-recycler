@@ -2,9 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
-import { createCodexRunner } from "./codexRunner.js";
 import { configureHttpRuntime } from "./http.js";
+import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { createCodexCliAdapter } from "./services/codexCliAdapter.js";
+import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { createStore } from "./store.js";
+import { type AgentAdapter } from "./types.js";
 
 loadDotEnv(path.resolve(process.cwd(), "../../.env"));
 loadDotEnv(path.resolve(process.cwd(), ".env"));
@@ -26,12 +29,22 @@ const projectId =
   process.env.SIGNAL_RECYCLER_PROJECT_ID ?? path.basename(workingDirectory);
 
 const store = createStore(dbPath);
+const codexSdkAdapter = createCodexSdkAdapter({ store, apiPort: port, projectId, workingDirectory });
+const adapters: Partial<Record<AgentAdapter["id"], AgentAdapter>> = { codex_sdk: codexSdkAdapter };
+if (process.env.SIGNAL_RECYCLER_CODEX_CLI === "1") {
+  adapters.codex_cli = createCodexCliAdapter({ store });
+}
+const agentAdapterRegistry = createAgentAdapterRegistry({
+  defaultAdapter: "codex_sdk",
+  adapters
+});
 const app = await createApp({
   store,
   projectId,
   workingDirectory,
   databasePath: dbPath,
-  codexRunner: createCodexRunner({ store, apiPort: port, projectId, workingDirectory })
+  codexRunner: codexSdkAdapter,
+  agentAdapterRegistry
 });
 
 await app.listen({ port, host: "127.0.0.1" });

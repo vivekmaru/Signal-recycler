@@ -123,6 +123,9 @@ export const memoryUsageSchema = z.object({
 });
 export type MemoryUsage = z.infer<typeof memoryUsageSchema>;
 
+export const agentAdapterSchema = z.enum(["default", "mock", "codex_sdk", "codex_cli"]);
+export type AgentAdapter = z.infer<typeof agentAdapterSchema>;
+
 export const memoryRetrievalDecisionSchema = z.object({
   memoryId: z.string(),
   rank: z.number().int().positive().nullable(),
@@ -174,7 +177,8 @@ export const classifierResultSchema = z.object({
 export type ClassifierResult = z.infer<typeof classifierResultSchema>;
 
 export const runRequestSchema = z.object({
-  prompt: z.string().min(1)
+  prompt: z.string().min(1),
+  adapter: agentAdapterSchema.default("default")
 });
 
 export const memoryRetrievalRequestSchema = z.object({

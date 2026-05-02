@@ -322,7 +322,7 @@ The current app can create rules but cannot select among them well. Injection sh
 
 Implementation plan: `docs/superpowers/plans/2026-05-02-phase-3-memory-retrieval.md`
 
-Current status: PR in progress on `phase-3-memory-retrieval`. The branch adds shared retrieval schemas, a SQLite FTS5/BM25 memory index over approved local memories, `POST /api/memory/retrieve`, retrieval before proxy and mock Codex injection, retrieval audit events, and deterministic retrieval evals. It is not yet marked merged or shipped.
+Current status: implemented and merged. Phase 3 adds shared retrieval schemas, a SQLite FTS5/BM25 memory index over approved local memories, `POST /api/memory/retrieve`, retrieval before proxy and mock Codex injection, retrieval audit events, deterministic retrieval evals, and the Phase 3.1 hardening follow-up for memory feedback loops and audit consistency.
 
 Success criteria:
 
