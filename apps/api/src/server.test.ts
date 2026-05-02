@@ -706,6 +706,35 @@ describe("api", () => {
     expect(events.some((event) => event.title === "Codex run failed")).toBe(true);
   });
 
+  it("uses the mock adapter selected by the run request", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("default runner should not be used");
+        }
+      }
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Run package manager validation for this repo.",
+        adapter: "mock"
+      }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().finalResponse).toContain("Encountered a failure");
+    expect(events.map((event) => event.category)).toContain("codex_event");
+  });
+
   it("does not reject proxy requests before the handler when content-length is stale", async () => {
     vi.stubGlobal(
       "fetch",

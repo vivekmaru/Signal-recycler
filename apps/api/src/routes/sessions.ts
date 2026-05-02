@@ -57,7 +57,8 @@ export async function registerSessionRoutes(
         codexRunner: options.codexRunner,
         projectId,
         sessionId: id,
-        prompt: parsed.prompt
+        prompt: parsed.prompt,
+        adapter: parsed.adapter
       });
     } catch (error) {
       const message = (error as Error).message;

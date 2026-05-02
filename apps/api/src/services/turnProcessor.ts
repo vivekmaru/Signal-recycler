@@ -1,4 +1,4 @@
-import { type CandidateRule, type MemoryRecord } from "@signal-recycler/shared";
+import { type AgentAdapter, type CandidateRule, type MemoryRecord } from "@signal-recycler/shared";
 import { classifyTurn } from "../classifier.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
@@ -9,6 +9,7 @@ export type ProcessTurnInput = {
   projectId: string;
   sessionId: string;
   prompt: string;
+  adapter?: AgentAdapter;
   workingDirectory?: string;
   classifyTitle?: string;
 };
@@ -18,11 +19,14 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
   items: unknown[];
   candidateRules: ReturnType<SignalRecyclerStore["listRules"]>;
 }> {
-  const turn = await input.codexRunner.run({
-    sessionId: input.sessionId,
-    prompt: input.prompt,
-    ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
-  });
+  const turn =
+    input.adapter === "mock"
+      ? await runMockTurn(input)
+      : await input.codexRunner.run({
+          sessionId: input.sessionId,
+          prompt: input.prompt,
+          ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
+        });
 
   const codexEvent = input.store.createEvent({
     sessionId: input.sessionId,
@@ -97,6 +101,15 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
   });
 
   return { finalResponse: turn.finalResponse, items: turn.items, candidateRules };
+}
+
+async function runMockTurn(
+  input: ProcessTurnInput
+): Promise<{ finalResponse: string; items: unknown[] }> {
+  return {
+    finalResponse: "Encountered a failure. The correction should be captured as a durable rule.",
+    items: [{ type: "mock", injected: input.prompt }]
+  };
 }
 
 function isCoveredByApprovedMemory(candidate: CandidateRule, memories: MemoryRecord[]): boolean {
