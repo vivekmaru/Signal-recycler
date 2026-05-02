@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
+import { renderPlaybookBlock } from "./playbook.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
 
@@ -848,6 +849,84 @@ describe("api", () => {
         skipped: [expect.objectContaining({ memoryId: unrelated.id })],
         metrics: expect.objectContaining({ selectedMemories: 1 })
       }
+    });
+    expect(store.listMemoryUsages(relevant.id)).toHaveLength(1);
+    expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
+  });
+
+  it("does not retrieve from an existing injected playbook on proxy requests", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const relevant = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const unrelated = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens for UI theme changes.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-existing-playbook"
+      },
+      payload: JSON.stringify({
+        input: [
+          {
+            type: "message",
+            role: "system",
+            content: renderPlaybookBlock([relevant, unrelated])
+          },
+          {
+            type: "message",
+            role: "user",
+            content: "Run package manager validation for this repo."
+          }
+        ]
+      })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-existing-playbook");
+    const retrievalEvent = events.find((event) => event.category === "memory_retrieval");
+    const memoryEvent = events.find((event) => event.category === "memory_injection");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input[0].content).toContain("Use pnpm test instead of npm test.");
+    expect(forwardedBody.input[0].content).not.toContain(
+      "Use approved theme tokens for UI theme changes."
+    );
+    expect(retrievalEvent?.metadata).toMatchObject({
+      query: "Run package manager validation for this repo.",
+      selected: [expect.objectContaining({ memoryId: relevant.id })],
+      skipped: [expect.objectContaining({ memoryId: unrelated.id })],
+      metrics: expect.objectContaining({ selectedMemories: 1, skippedMemories: 1 })
+    });
+    expect(memoryEvent?.metadata).toMatchObject({
+      memoryIds: [relevant.id],
+      retrieval: expect.objectContaining({
+        metrics: expect.objectContaining({ selectedMemories: 1, skippedMemories: 1 })
+      })
     });
     expect(store.listMemoryUsages(relevant.id)).toHaveLength(1);
     expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);

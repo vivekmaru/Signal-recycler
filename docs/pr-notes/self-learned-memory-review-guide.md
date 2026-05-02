@@ -2,9 +2,12 @@
 
 ## Scope Summary
 
-This branch fixes a post-run learning bug found during manual product smoke: when an approved memory was injected into a run and the agent echoed that memory back, the classifier could create and auto-approve a duplicate or broader memory.
+This branch fixes two memory feedback-loop bugs found during manual product smoke:
 
-The fix prevents candidate rule creation when the candidate is already covered by existing approved memory.
+1. When an approved memory was injected into a run and the agent echoed that memory back, the classifier could create and auto-approve a duplicate or broader memory.
+2. When proxy traffic already contained a Signal Recycler playbook block, retrieval could use that injected memory text as query input and select memories that were not relevant to the user's prompt.
+
+The fix prevents candidate rule creation when the candidate is already covered by existing approved memory, and ensures proxy retrieval is driven by user task text rather than previously injected playbook/system context.
 
 ## Change Map
 
@@ -16,29 +19,54 @@ The fix prevents candidate rule creation when the candidate is already covered b
   - Treats candidates whose reason quotes an approved memory as already covered.
   - Treats equivalent command corrections, such as `use pnpm ... instead of npm`, as already covered even when the candidate wording is broader.
 
+### Proxy Retrieval
+
+- `apps/api/src/routes/proxy.ts`
+  - Extracts retrieval queries from user-role input/messages first.
+  - Ignores system/developer/assistant/tool messages for retrieval query extraction.
+  - Strips existing Signal Recycler playbook blocks before using text for retrieval.
+
+### Playbook Utilities
+
+- `apps/api/src/playbook.ts`
+  - Exports playbook stripping so injection and proxy retrieval share the same cleanup behavior.
+
+### Store Retrieval
+
+- `apps/api/src/store.ts`
+  - Uses insertion order as the duplicate tie-breaker when approved duplicate memories share the same approval timestamp.
+
 ### API Tests
 
 - `apps/api/src/server.test.ts`
   - Adds a regression test for the smoke scenario where the run echoes injected pnpm memory.
   - Asserts no new `rule_candidate` or `rule_auto_approved` event is created.
+  - Adds a regression test for proxy requests that already contain an injected playbook block.
+  - Asserts only the user-prompt-relevant memory is reinjected.
 
 ## Reviewer Focus Areas
 
 - Confirm the duplicate suppression is narrow enough not to block genuinely new memories.
 - Confirm the command correction equivalence check is deterministic and easy to reason about.
 - Confirm the behavior applies only before persisting candidates, not before writing the classifier audit event.
+- Confirm proxy retrieval should ignore non-user messages in agent request packets.
+- Confirm stripping existing playbook blocks does not weaken the actual injection path.
 
 ## Known Non-Blockers
 
 - The classifier still reports the raw candidate in the `classifier_result` metadata. This preserves auditability of what the distiller saw, while preventing duplicate memory persistence.
 - The command correction parser is intentionally simple and covers the current `use X instead of Y` family. Broader semantic dedupe remains future work.
+- If a proxy request has no user-role input/messages, retrieval still falls back to sanitized `instructions` text.
 
 ## Verification
 
-- `pnpm --filter @signal-recycler/api test -- server.test.ts classifier.test.ts`
-  - Passed: 13 files, 104 tests.
+- `pnpm --filter @signal-recycler/api test -- server.test.ts store.test.ts`
+  - Passed: 13 files, 105 tests.
 - `pnpm --filter @signal-recycler/api type-check`
   - Passed.
+- Manual local API smoke on port `3002`
+  - Reset memory, added two approved memories, ran `Run package manager validation for this repo.`
+  - Observed one retrieval selection and one injected memory.
 - `git diff --check`
   - Passed.
 

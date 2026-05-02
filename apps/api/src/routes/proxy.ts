@@ -1,6 +1,6 @@
 import { type FastifyInstance } from "fastify";
 import { compressRequestBody } from "../compressor.js";
-import { injectIntoRequestBody } from "../playbook.js";
+import { injectIntoRequestBody, stripPlaybookBlocks } from "../playbook.js";
 import { recordMemoryInjection } from "../services/memoryInjection.js";
 import { retrieveRelevantMemories } from "../services/memoryRetrieval.js";
 import { type SignalRecyclerStore } from "../store.js";
@@ -279,25 +279,45 @@ function extractProxyQueryText(body: unknown): string {
   }
   if (!isPlainObject(body)) return "";
 
-  const parts = [
-    extractText((body as Record<string, unknown>).instructions),
-    extractText((body as Record<string, unknown>).input),
-    extractText((body as Record<string, unknown>).messages)
+  const record = body as Record<string, unknown>;
+  const promptParts = [
+    extractUserText(record.input),
+    extractUserText(record.messages)
   ].filter((part) => part.length > 0);
 
-  return parts.join("\n\n");
+  if (promptParts.length > 0) return promptParts.join("\n\n");
+  return extractPlainText(record.instructions);
 }
 
-function extractText(value: unknown): string {
-  if (typeof value === "string") return value.trim();
+function extractUserText(value: unknown): string {
+  if (typeof value === "string") return cleanRetrievalText(value);
   if (Array.isArray(value)) {
-    return value.map(extractText).filter((part) => part.length > 0).join("\n");
+    return value.map(extractUserText).filter((part) => part.length > 0).join("\n");
   }
   if (!isPlainObject(value)) return "";
 
-  const text = extractText(value.text);
-  const content = extractText(value.content);
+  const role = typeof value.role === "string" ? value.role.toLowerCase() : null;
+  if (role && role !== "user") return "";
+
+  const text = extractUserText(value.text);
+  const content = extractUserText(value.content);
   return [text, content].filter((part) => part.length > 0).join("\n");
+}
+
+function extractPlainText(value: unknown): string {
+  if (typeof value === "string") return cleanRetrievalText(value);
+  if (Array.isArray(value)) {
+    return value.map(extractPlainText).filter((part) => part.length > 0).join("\n");
+  }
+  if (!isPlainObject(value)) return "";
+
+  const text = extractPlainText(value.text);
+  const content = extractPlainText(value.content);
+  return [text, content].filter((part) => part.length > 0).join("\n");
+}
+
+function cleanRetrievalText(value: string): string {
+  return stripPlaybookBlocks(value).trim();
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
