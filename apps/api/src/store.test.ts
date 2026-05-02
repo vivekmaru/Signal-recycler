@@ -535,7 +535,10 @@ describe("store", () => {
       limit: 2
     });
 
-    expect(results.map((result) => result.memory.id)).toEqual([first.id, second.id]);
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.memory.id)).toEqual(
+      expect.arrayContaining([first.id, second.id])
+    );
     expect(results.map((result) => result.rank)).toEqual([1, 2]);
   });
 

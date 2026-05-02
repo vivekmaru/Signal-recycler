@@ -32,10 +32,11 @@ export async function registerProxyRoutes(
     const originalItems = countInputItems(request.body);
 
     let rawBody = request.body;
+    const internalSignalRecyclerRequest = isSignalRecyclerInternalRequest(rawBody);
     let charsRemoved = 0;
     let tokensRemoved = 0;
     let compressions = 0;
-    if (rawBody && request.method === "POST") {
+    if (rawBody && request.method === "POST" && !internalSignalRecyclerRequest) {
       const { body: compressed, result } = compressRequestBody(rawBody);
       if (result && result.charsRemoved > 0) {
         rawBody = compressed;
@@ -59,7 +60,7 @@ export async function registerProxyRoutes(
 
     const retrievalQuery = extractProxyQueryText(rawBody);
     const retrieval =
-      rules.length > 0 && retrievalQuery.length > 0
+      !internalSignalRecyclerRequest && rules.length > 0 && retrievalQuery.length > 0
         ? retrieveRelevantMemories({
             store: options.store,
             projectId: options.projectId,
@@ -105,7 +106,8 @@ export async function registerProxyRoutes(
         finalItems,
         compressions,
         tokensRemoved,
-        injectedRules
+        injectedRules,
+        internalSignalRecyclerRequest
       }),
       metadata: {
         projectId: options.projectId,
@@ -119,6 +121,7 @@ export async function registerProxyRoutes(
         charsRemoved,
         tokensRemoved,
         injectedRules,
+        internalSignalRecyclerRequest,
         ruleIds: injection.injected ? selectedRules.map((r) => r.id) : [],
         retrieval: retrieval
           ? {
@@ -222,9 +225,14 @@ function buildProxyRequestSummary(input: {
   compressions: number;
   tokensRemoved: number;
   injectedRules: number;
+  internalSignalRecyclerRequest: boolean;
 }): string {
   const lines: string[] = [];
   lines.push(`${input.method} ${input.tail}`);
+  if (input.internalSignalRecyclerRequest) {
+    lines.push("Forwarded unchanged (Signal Recycler internal request).");
+    return lines.join("\n");
+  }
   if (input.originalSize > 0) {
     const delta = input.finalSize - input.originalSize;
     const sign = delta >= 0 ? "+" : "";
@@ -287,6 +295,18 @@ function extractProxyQueryText(body: unknown): string {
 
   if (promptParts.length > 0) return promptParts.join("\n\n");
   return extractPlainText(record.instructions);
+}
+
+function isSignalRecyclerInternalRequest(body: unknown): boolean {
+  const text = extractPlainText(body);
+  if (text.includes("Classify this Codex turn for Signal Recycler.")) return true;
+  if (!isPlainObject(body)) return false;
+
+  const textFormat = body.text;
+  if (!isPlainObject(textFormat)) return false;
+  const format = textFormat.format;
+  if (!isPlainObject(format)) return false;
+  return format.name === "signal_recycler_classifier";
 }
 
 function extractUserText(value: unknown): string {

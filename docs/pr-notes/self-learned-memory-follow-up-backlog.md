@@ -24,6 +24,12 @@ Residual risk: proxy retrieval now strips existing playbook blocks, but the even
 
 Next action: add retrieval debug metadata with source fields such as `querySource: "user_input"` and `strippedPlaybookBlocks: number`.
 
+## P1: Add Internal Request Classifier Contract Tests
+
+Residual risk: internal classifier request detection currently keys off the classifier prompt marker and JSON schema name.
+
+Next action: extract internal request detection into a small tested helper with fixtures for current OpenAI SDK request shapes and likely future variants.
+
 ## P2: Consider Memory Update Instead Of Suppression
 
 Residual risk: a broader candidate may sometimes be a legitimate refinement of a narrower approved memory.

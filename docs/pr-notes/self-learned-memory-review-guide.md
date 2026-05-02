@@ -6,8 +6,9 @@ This branch fixes two memory feedback-loop bugs found during manual product smok
 
 1. When an approved memory was injected into a run and the agent echoed that memory back, the classifier could create and auto-approve a duplicate or broader memory.
 2. When proxy traffic already contained a Signal Recycler playbook block, retrieval could use that injected memory text as query input and select memories that were not relevant to the user's prompt.
+3. When Signal Recycler's own classifier call was routed through the proxy, the proxy could inject project memory into the classifier request and count it as runtime context injection.
 
-The fix prevents candidate rule creation when the candidate is already covered by existing approved memory, and ensures proxy retrieval is driven by user task text rather than previously injected playbook/system context.
+The fix prevents candidate rule creation when the candidate is already covered by existing approved memory, ensures proxy retrieval is driven by user task text rather than previously injected playbook/system context, and skips retrieval/injection for internal classifier requests.
 
 ## Change Map
 
@@ -25,6 +26,7 @@ The fix prevents candidate rule creation when the candidate is already covered b
   - Extracts retrieval queries from user-role input/messages first.
   - Ignores system/developer/assistant/tool messages for retrieval query extraction.
   - Strips existing Signal Recycler playbook blocks before using text for retrieval.
+  - Detects Signal Recycler internal classifier requests and forwards them unchanged without memory retrieval or injection.
 
 ### Playbook Utilities
 
@@ -43,6 +45,8 @@ The fix prevents candidate rule creation when the candidate is already covered b
   - Asserts no new `rule_candidate` or `rule_auto_approved` event is created.
   - Adds a regression test for proxy requests that already contain an injected playbook block.
   - Asserts only the user-prompt-relevant memory is reinjected.
+  - Adds a regression test for classifier-shaped proxy requests.
+  - Asserts internal classifier requests do not create retrieval or injection events.
 
 ## Reviewer Focus Areas
 
@@ -51,17 +55,19 @@ The fix prevents candidate rule creation when the candidate is already covered b
 - Confirm the behavior applies only before persisting candidates, not before writing the classifier audit event.
 - Confirm proxy retrieval should ignore non-user messages in agent request packets.
 - Confirm stripping existing playbook blocks does not weaken the actual injection path.
+- Confirm internal classifier detection is narrow enough to avoid disabling normal agent requests.
 
 ## Known Non-Blockers
 
 - The classifier still reports the raw candidate in the `classifier_result` metadata. This preserves auditability of what the distiller saw, while preventing duplicate memory persistence.
 - The command correction parser is intentionally simple and covers the current `use X instead of Y` family. Broader semantic dedupe remains future work.
 - If a proxy request has no user-role input/messages, retrieval still falls back to sanitized `instructions` text.
+- Internal classifier proxy requests still emit a `proxy_request` audit event, but not `memory_retrieval` or `memory_injection`.
 
 ## Verification
 
 - `pnpm --filter @signal-recycler/api test -- server.test.ts store.test.ts`
-  - Passed: 13 files, 105 tests.
+  - Passed: 13 files, 106 tests.
 - `pnpm --filter @signal-recycler/api type-check`
   - Passed.
 - Manual local API smoke on port `3002`
