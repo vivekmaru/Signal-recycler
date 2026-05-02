@@ -52,7 +52,7 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 - Memory mutation hardening for superseded records is enforced in the UI, but the API should also reject direct approve/reject mutation attempts for superseded records.
 - Evals is intentionally preview-only because no web eval report endpoint is connected.
 - Context Index is intentionally retrieval-preview-only until Phase 5 source indexing exists.
-- Browser and mobile layout smoke was not run in this task because the task explicitly asked not to start a long-lived dev server.
+- Local dev/API smoke passed with `SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev`, but visual browser screenshot smoke was not run because the repo does not include a Playwright/browser automation binary.
 - The new-session modal does not yet implement full focus trap and escape-key polish.
 
 ## Verification Commands And Results
@@ -63,6 +63,10 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 - `pnpm type-check`: passed. Workspace type-check completed for `packages/shared`, `apps/web`, and `apps/api`.
 - `pnpm build`: passed. Workspace build completed for `packages/shared`, `apps/api`, and `apps/web`; Vite built 1718 modules and emitted `dist/index.html`, `dist/assets/index-CvF7CtH7.css`, and `dist/assets/index-BJOXtznz.js`.
 - `rg -n "Codex traffic|Run end-to-end demo|Use from your terminal|approved-memory|approved memory|Approved memory|Approved Memory" apps/web/src/App.tsx`: no matches. Command exited 1 because ripgrep found no obsolete strings.
+- `SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev`: passed for local serving. Vite served `http://127.0.0.1:5173/`, the API served `http://127.0.0.1:3001`, and `/health` returned `{"ok":true}`.
+- Local mock session smoke: passed. A mock session run returned 5 complete session events from `/api/sessions/:id/events`, including `codex_event`, `memory_retrieval`, `memory_injection`, and `classifier_result`.
+- Local retrieval preview smoke: passed. `POST /api/memory/retrieve` for a validation prompt returned `approvedMemories: 2`, `selectedMemories: 1`, `skippedMemories: 1`, and `limit: 5`.
+- Visual screenshot smoke: not run. `pnpm exec playwright screenshot` failed because the workspace does not provide a `playwright` binary.
 
 ## Explicit Out-Of-Scope Items
 

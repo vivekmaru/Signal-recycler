@@ -30,11 +30,11 @@ Residual risk: the Memory Review UI disables approve/reject actions for supersed
 
 Next action: add server-side guards and regression tests for approving or rejecting superseded memory records. Return a clear 4xx error and keep the durable memory record unchanged.
 
-## P2: Run Browser And Mobile Layout Smoke
+## P2: Run Visual Browser And Mobile Layout Smoke
 
-Residual risk: unit tests, type-check, and build pass, but desktop and narrow viewport rendering were not smoke-tested in this task because no long-lived dev server was started.
+Residual risk: unit tests, type-check, build, and local dev/API smoke pass, but desktop and narrow viewport rendering were not screenshot-tested because the workspace does not include a Playwright/browser automation binary.
 
-Next action: run a local browser smoke covering Dashboard, Sessions, Session Detail, Memory Review, Context Index preview, Evals preview, and New Session modal at desktop and mobile widths.
+Next action: add a browser automation dependency or use the available in-app browser, then run a visual smoke covering Dashboard, Sessions, Session Detail, Memory Review, Context Index preview, Evals preview, and New Session modal at desktop and mobile widths.
 
 ## P1: Add A Stable Eval Report Endpoint
 
