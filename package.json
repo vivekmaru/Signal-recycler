@@ -12,6 +12,7 @@
     "eval": "pnpm --filter @signal-recycler/api eval",
     "eval:live": "pnpm --filter @signal-recycler/api eval:live",
     "smoke:demo": "node scripts/smoke-demo.mjs",
+    "smoke:memory": "node scripts/smoke-memory-retrieval.mjs",
     "codex:install": "node scripts/codex-config.mjs install",
     "codex:uninstall": "node scripts/codex-config.mjs uninstall"
   },

@@ -282,6 +282,15 @@ pnpm smoke:demo
 
 `pnpm smoke:demo` expects the API to be running against a smoke/test database unless `SIGNAL_RECYCLER_ALLOW_SHARED_SMOKE_DB=1` is set explicitly.
 
+For the Phase 3 retrieval/injection smoke:
+
+```bash
+SIGNAL_RECYCLER_MOCK_CODEX=1 SIGNAL_RECYCLER_DB=/tmp/signal-recycler-memory-smoke.sqlite pnpm dev
+pnpm smoke:memory
+```
+
+The smoke resets memory, creates one relevant and one irrelevant approved memory, runs a package-manager prompt, and fails unless exactly one memory is retrieved and injected.
+
 ## Product evals
 
 Phase 1 adds local evals so Signal Recycler can measure product claims without relying on the demo script.
