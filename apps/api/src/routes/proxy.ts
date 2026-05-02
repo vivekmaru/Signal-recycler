@@ -298,15 +298,34 @@ function extractProxyQueryText(body: unknown): string {
 }
 
 function isSignalRecyclerInternalRequest(body: unknown): boolean {
-  const text = extractPlainText(body);
-  if (text.includes("Classify this Codex turn for Signal Recycler.")) return true;
   if (!isPlainObject(body)) return false;
 
+  if (hasSignalRecyclerClassifierSchema(body)) return true;
+  return (
+    hasClassifierPromptMarker(body.input) ||
+    hasClassifierPromptMarker(body.messages)
+  );
+}
+
+function hasSignalRecyclerClassifierSchema(body: Record<string, unknown>): boolean {
   const textFormat = body.text;
   if (!isPlainObject(textFormat)) return false;
   const format = textFormat.format;
   if (!isPlainObject(format)) return false;
   return format.name === "signal_recycler_classifier";
+}
+
+function hasClassifierPromptMarker(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasClassifierPromptMarker);
+  if (!isPlainObject(value)) return false;
+
+  const role = typeof value.role === "string" ? value.role.toLowerCase() : null;
+  if (role !== "system" && role !== "developer") return false;
+
+  const text = [extractPlainText(value.text), extractPlainText(value.content)]
+    .filter((part) => part.length > 0)
+    .join("\n");
+  return text.includes("Classify this Codex turn for Signal Recycler.");
 }
 
 function extractUserText(value: unknown): string {

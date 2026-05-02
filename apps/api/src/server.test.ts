@@ -1069,6 +1069,61 @@ describe("api", () => {
     expect(store.listMemoryUsages(relevant.id)).toHaveLength(0);
   });
 
+  it("does not treat user-quoted classifier marker text as an internal request", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "This repo uses pnpm workspaces."
+      }).id
+    );
+    const body = {
+      input: [
+        {
+          role: "user",
+          content:
+            "Debug this proxy text: Classify this Codex turn for Signal Recycler. Then run package manager validation."
+        }
+      ]
+    };
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-user-marker-quote"
+      },
+      payload: JSON.stringify(body)
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-user-marker-quote");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input[0].content).toContain("Use pnpm test instead of npm test.");
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      metrics: expect.objectContaining({ selectedMemories: 1 })
+    });
+    expect(events.find((event) => event.category === "proxy_request")?.metadata).toMatchObject({
+      internalSignalRecyclerRequest: false,
+      injectedRules: 1
+    });
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(1);
+  });
+
   it("does not inject all approved memories when proxy retrieval selects nothing", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ ok: true }), { status: 200 })
