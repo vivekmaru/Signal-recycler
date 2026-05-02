@@ -84,7 +84,8 @@ describe("createCodexCliAdapter", () => {
       "codex-test",
       ["exec", "--json", "--skip-git-repo-check", "Run."],
       expect.objectContaining({
-        cwd: "/tmp/not-a-git-repo"
+        cwd: "/tmp/not-a-git-repo",
+        stdio: ["ignore", "pipe", "pipe"]
       })
     );
   });

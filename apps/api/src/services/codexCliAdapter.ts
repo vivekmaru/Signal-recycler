@@ -40,7 +40,8 @@ export function createCodexCliAdapter(input: {
       return new Promise((resolve, reject) => {
         const child = spawn(command, ["exec", "--json", "--skip-git-repo-check", runInput.prompt], {
           cwd: runInput.workingDirectory,
-          env: process.env
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"]
         });
         const assistantMessages: string[] = [];
         const items: unknown[] = [];
