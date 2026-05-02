@@ -26,6 +26,13 @@ This PR tightens lexical memory retrieval so generic `test`-only prompts do not 
    - No `memory_injection` event is created.
    - The forwarded prompt remains `test`.
 
+## Verification
+
+- `pnpm --filter @signal-recycler/api test -- store.test.ts memoryRetrieval.test.ts server.test.ts`
+- `pnpm test`
+- `pnpm type-check`
+- `pnpm eval`
+
 ## Reviewer Questions
 
 - Are `test/tests/testing` too broad to use as standalone retrieval terms? This PR assumes yes.
