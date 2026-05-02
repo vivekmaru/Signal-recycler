@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
 import { renderPlaybookBlock } from "./playbook.js";
+import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
 
@@ -741,6 +742,45 @@ describe("api", () => {
         })
       ])
     );
+  });
+
+  it("uses the app-provided adapter registry for default session runs", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_sdk: {
+            id: "codex_sdk",
+            run: async () => ({
+              finalResponse: "registry adapter response",
+              items: [{ type: "registry" }]
+            })
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: { prompt: "Run through default registry adapter.", adapter: "default" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      finalResponse: "registry adapter response",
+      items: [{ type: "registry" }]
+    });
   });
 
   it("returns a clear error when the Codex CLI adapter is selected before configuration", async () => {

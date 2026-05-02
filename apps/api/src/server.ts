@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
-import { createCodexRunner } from "./codexRunner.js";
 import { configureHttpRuntime } from "./http.js";
+import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { createStore } from "./store.js";
 
 loadDotEnv(path.resolve(process.cwd(), "../../.env"));
@@ -26,12 +27,18 @@ const projectId =
   process.env.SIGNAL_RECYCLER_PROJECT_ID ?? path.basename(workingDirectory);
 
 const store = createStore(dbPath);
+const codexSdkAdapter = createCodexSdkAdapter({ store, apiPort: port, projectId, workingDirectory });
+const agentAdapterRegistry = createAgentAdapterRegistry({
+  defaultAdapter: process.env.SIGNAL_RECYCLER_MOCK_CODEX === "1" ? "mock" : "codex_sdk",
+  adapters: { codex_sdk: codexSdkAdapter }
+});
 const app = await createApp({
   store,
   projectId,
   workingDirectory,
   databasePath: dbPath,
-  codexRunner: createCodexRunner({ store, apiPort: port, projectId, workingDirectory })
+  codexRunner: codexSdkAdapter,
+  agentAdapterRegistry
 });
 
 await app.listen({ port, host: "127.0.0.1" });

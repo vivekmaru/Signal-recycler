@@ -8,6 +8,7 @@ import {
 } from "./routes/proxy.js";
 import { registerRuleRoutes } from "./routes/rules.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { type createAgentAdapterRegistry } from "./services/agentAdapters.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -18,6 +19,7 @@ type AppOptions = {
   workingDirectory: string;
   databasePath?: string;
   upstreamBaseUrl?: string;
+  agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
 };
 
 export async function createApp(options: AppOptions): Promise<FastifyInstance> {
