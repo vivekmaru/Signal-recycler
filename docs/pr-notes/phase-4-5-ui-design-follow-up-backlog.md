@@ -2,9 +2,9 @@
 
 ## P0: Convert The Design Into An Implementation Plan
 
-Residual risk: the design is not executable until it is broken into implementation tasks with verification steps.
+Status: complete in `docs/superpowers/plans/2026-05-03-phase-4-5-owned-session-ux.md`.
 
-Next action: after user review, create `docs/superpowers/plans/2026-05-03-phase-4-5-owned-session-ux.md` with route/component/API mapping and test checkpoints.
+Next action: choose Subagent-Driven or Inline Execution for implementation.
 
 ## P0: Avoid Unsupported Context Index Claims
 
@@ -35,3 +35,9 @@ Next action: decide whether Phase 4.5 adds a read-only eval report endpoint or d
 Residual risk: preview surfaces can look broken if unsupported actions are visible but inert.
 
 Next action: document and implement empty states for Compare, Replay, Context Index, Evals, Sync, and unsupported adapters.
+
+## P1: Plan May Need Adjustment After First Web Type-Check
+
+Residual risk: the implementation plan uses concrete snippets against a rapidly changing `apps/web` surface. Minor TypeScript shape differences may appear during execution.
+
+Next action: during Task 1 and Task 2 execution, prefer the plan's component boundaries and test intent over copying snippets blindly if type-check exposes better local names.
