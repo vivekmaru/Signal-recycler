@@ -3,10 +3,12 @@ import type { AgentAdapter, SessionRecord } from "@signal-recycler/shared";
 import { createSession, runSession } from "./api";
 import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
+import { MetricTile } from "./components/MetricTile";
 import { useDashboardData } from "./hooks/useDashboardData";
-import { compactId, formatDateTime } from "./lib/format";
 import { buildDashboardMetrics, summarizeSession } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
+import { DashboardView } from "./views/DashboardView";
+import { SessionsView } from "./views/SessionsView";
 
 const adapterOptions = [
   { value: "default", label: "Auto adapter" },
@@ -94,18 +96,39 @@ export function App() {
             Loading Signal Recycler data...
           </div>
         ) : (
-          <RoutePlaceholder
-            route={route}
-            sessions={data.sessions}
-            selectedSession={selectedSession}
-            eventsBySession={data.eventsBySession}
-            metrics={metrics}
-            onOpenSession={(sessionId) => {
-              setSelectedSessionId(sessionId);
-              setRoute("session");
-            }}
-            onRouteChange={setRoute}
-          />
+          <>
+            {route === "dashboard" ? (
+              <DashboardView
+                events={data.events}
+                eventsBySession={data.eventsBySession}
+                memories={data.memories}
+                onOpenMemory={() => setRoute("memory")}
+                onOpenSession={(sessionId) => {
+                  setSelectedSessionId(sessionId);
+                  setRoute("session");
+                }}
+                sessions={data.sessions}
+              />
+            ) : null}
+            {route === "sessions" ? (
+              <SessionsView
+                eventsBySession={data.eventsBySession}
+                onOpenSession={(sessionId) => {
+                  setSelectedSessionId(sessionId);
+                  setRoute("session");
+                }}
+                sessions={data.sessions}
+              />
+            ) : null}
+            {route !== "dashboard" && route !== "sessions" ? (
+              <RoutePlaceholder
+                route={route}
+                selectedSession={selectedSession}
+                eventsBySession={data.eventsBySession}
+                onRouteChange={setRoute}
+              />
+            ) : null}
+          </>
         )}
       </section>
       {newSessionOpen ? (
@@ -134,19 +157,13 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
 
 function RoutePlaceholder({
   route,
-  sessions,
   selectedSession,
   eventsBySession,
-  metrics,
-  onOpenSession,
   onRouteChange
 }: {
   route: AppRoute;
-  sessions: SessionRecord[];
   selectedSession: SessionRecord | null;
   eventsBySession: Map<string, import("@signal-recycler/shared").TimelineEvent[]>;
-  metrics: ReturnType<typeof buildDashboardMetrics>;
-  onOpenSession: (sessionId: string) => void;
   onRouteChange: (route: AppRoute) => void;
 }) {
   if (route === "session") {
@@ -159,13 +176,7 @@ function RoutePlaceholder({
     );
   }
 
-  if (route === "sessions") {
-    return <SessionsPlaceholder sessions={sessions} eventsBySession={eventsBySession} onOpenSession={onOpenSession} />;
-  }
-
-  if (route === "dashboard") {
-    return <DashboardPlaceholder metrics={metrics} onRouteChange={onRouteChange} />;
-  }
+  if (route === "dashboard" || route === "sessions") return null;
 
   const copy: Record<Exclude<AppRoute, "dashboard" | "sessions" | "session">, { title: string; body: string }> = {
     memory: {
@@ -198,89 +209,6 @@ function RoutePlaceholder({
   );
 }
 
-function DashboardPlaceholder({
-  metrics,
-  onRouteChange
-}: {
-  metrics: ReturnType<typeof buildDashboardMetrics>;
-  onRouteChange: (route: AppRoute) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-stone-950">Owned-session control plane</h1>
-        <p className="mt-1 text-sm text-stone-500">
-          Shell routing and live data loading are active. Rich dashboard cards are scheduled for the next view task.
-        </p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-4">
-        <Metric label="Active sessions" value={metrics.activeSessions} />
-        <Metric label="Approved memory" value={metrics.approvedMemory} />
-        <Metric label="Pending memory" value={metrics.pendingMemory} />
-        <Metric label="Context events" value={metrics.recentContextEvents} />
-      </div>
-      <PlaceholderFrame title="Dashboard placeholder">
-        <p>
-          This view uses real session, memory, and event counts. Detailed tables, inspectors, and transcript
-          separation are not implemented until later Phase 4.5 tasks.
-        </p>
-        <Button className="mt-4" onClick={() => onRouteChange("sessions")}>
-          Open sessions
-        </Button>
-      </PlaceholderFrame>
-    </div>
-  );
-}
-
-function SessionsPlaceholder({
-  sessions,
-  eventsBySession,
-  onOpenSession
-}: {
-  sessions: SessionRecord[];
-  eventsBySession: Map<string, import("@signal-recycler/shared").TimelineEvent[]>;
-  onOpenSession: (sessionId: string) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-stone-950">Sessions</h1>
-        <p className="mt-1 text-sm text-stone-500">
-          Real sessions are listed here. Filters and dense inspection are not implemented in this task.
-        </p>
-      </div>
-      <div className="overflow-hidden rounded-md border border-stone-200 bg-white">
-        {sessions.length === 0 ? (
-          <div className="p-6 text-sm text-stone-500">No sessions have been created for this project yet.</div>
-        ) : (
-          <div className="divide-y divide-stone-200">
-            {sessions.map((session) => {
-              const summary = summarizeSession(session, eventsBySession.get(session.id) ?? []);
-              return (
-                <button
-                  className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-stone-50"
-                  key={session.id}
-                  onClick={() => onOpenSession(session.id)}
-                  type="button"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold text-stone-950">{summary.title}</span>
-                    <span className="mt-1 block font-mono text-xs text-stone-500">{compactId(session.id)}</span>
-                  </span>
-                  <span className="shrink-0 text-right text-xs text-stone-500">
-                    <span className="block">{summary.eventCount} events</span>
-                    <span className="block">{formatDateTime(summary.startedAt)}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function SessionPlaceholder({
   session,
   events,
@@ -310,10 +238,10 @@ function SessionPlaceholder({
         <p className="mt-1 font-mono text-xs text-stone-500">{session.id}</p>
       </div>
       <div className="grid gap-3 md:grid-cols-4">
-        <Metric label="Status" value={summary.status.replace("_", " ")} />
-        <Metric label="Adapter" value={summary.adapter} />
-        <Metric label="Memory in" value={summary.memoryIn} />
-        <Metric label="Events" value={summary.eventCount} />
+        <MetricTile label="Status" value={summary.status.replace("_", " ")} />
+        <MetricTile label="Adapter" value={summary.adapter} />
+        <MetricTile label="Memory in" value={summary.memoryIn} />
+        <MetricTile label="Events" value={summary.eventCount} />
       </div>
       <PlaceholderFrame title="Session detail placeholder">
         <p>
@@ -322,15 +250,6 @@ function SessionPlaceholder({
         </p>
       </PlaceholderFrame>
     </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <section className="rounded-md border border-stone-200 bg-white p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-stone-950">{value}</div>
-    </section>
   );
 }
 
