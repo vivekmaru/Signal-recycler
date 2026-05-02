@@ -856,6 +856,59 @@ describe("api", () => {
     expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
   });
 
+  it("does not inject all approved memories when proxy retrieval has only stopwords", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createStore(":memory:");
+    const memory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/proxy/v1/responses",
+      headers: {
+        "content-type": "application/json",
+        "x-signal-recycler-session-id": "proxy-stopword-retrieval"
+      },
+      payload: JSON.stringify({ input: "the and of to" })
+    });
+    const forwardedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const events = store.listEvents("proxy-stopword-retrieval");
+
+    expect(response.statusCode).toBe(200);
+    expect(forwardedBody.input).toBe("the and of to");
+    expect(forwardedBody.input).not.toContain("Use pnpm for package scripts.");
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "the and of to",
+      selected: [],
+      skipped: [expect.objectContaining({ memoryId: memory.id })],
+      metrics: expect.objectContaining({
+        approvedMemories: 1,
+        selectedMemories: 0,
+        skippedMemories: 1
+      })
+    });
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
+    expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
+  });
+
   it("does not record proxy memory usage for requests without an injected body", async () => {
     vi.stubGlobal(
       "fetch",
