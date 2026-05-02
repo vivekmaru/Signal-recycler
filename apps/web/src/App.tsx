@@ -1,13 +1,13 @@
-import { useMemo, useState } from "react";
-import type { AgentAdapter, SessionRecord } from "@signal-recycler/shared";
-import { createSession, runSession } from "./api";
+import { useEffect, useMemo, useState } from "react";
+import type { AgentAdapter, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
+import { createSession, listEvents, runSession } from "./api";
 import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
-import { MetricTile } from "./components/MetricTile";
 import { useDashboardData } from "./hooks/useDashboardData";
-import { buildDashboardMetrics, summarizeSession } from "./lib/sessionPresenters";
+import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
 import { DashboardView } from "./views/DashboardView";
+import { SessionDetailView } from "./views/SessionDetailView";
 import { SessionsView } from "./views/SessionsView";
 
 const adapterOptions = [
@@ -24,6 +24,10 @@ export function App() {
   const [optimisticSession, setOptimisticSession] = useState<SessionRecord | null>(null);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [newSessionRunning, setNewSessionRunning] = useState(false);
+  const [sessionDetailEvents, setSessionDetailEvents] = useState<TimelineEvent[]>([]);
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
+  const [sessionDetailError, setSessionDetailError] = useState<string | null>(null);
+  const [sessionDetailReloadKey, setSessionDetailReloadKey] = useState(0);
 
   const metrics = useMemo(
     () =>
@@ -61,6 +65,7 @@ export function App() {
         await runSession(session.id, prompt, adapter);
       } finally {
         await data.refresh();
+        setSessionDetailReloadKey((key) => key + 1);
       }
     } catch (newSessionError: unknown) {
       data.setError(errorMessage(newSessionError));
@@ -78,6 +83,39 @@ export function App() {
     (optimisticSession?.id === selectedSessionId ? optimisticSession : null) ??
     data.sessions[0] ??
     null;
+  const selectedSessionIdForDetail = route === "session" ? (selectedSession?.id ?? null) : null;
+  const selectedSessionFirehoseEventCount = selectedSessionIdForDetail
+    ? (data.eventsBySession.get(selectedSessionIdForDetail)?.length ?? 0)
+    : 0;
+
+  useEffect(() => {
+    if (!selectedSessionIdForDetail) {
+      setSessionDetailEvents([]);
+      setSessionDetailError(null);
+      setSessionDetailLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSessionDetailEvents([]);
+    setSessionDetailError(null);
+    setSessionDetailLoading(true);
+
+    listEvents(selectedSessionIdForDetail)
+      .then((events) => {
+        if (!cancelled) setSessionDetailEvents(events);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setSessionDetailError(errorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setSessionDetailLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSessionFirehoseEventCount, selectedSessionIdForDetail, sessionDetailReloadKey]);
 
   return (
     <AppShell
@@ -89,7 +127,7 @@ export function App() {
         if (!newSessionRunning) setNewSessionOpen(true);
       }}
     >
-      <section className="p-6">
+      <section className={route === "session" ? "" : "p-6"}>
         {data.error ? <ErrorBanner message={data.error} onDismiss={() => data.setError(null)} /> : null}
         {data.loading ? (
           <div className="rounded-md border border-stone-200 bg-white p-4 text-sm text-stone-500">
@@ -120,12 +158,21 @@ export function App() {
                 sessions={data.sessions}
               />
             ) : null}
-            {route !== "dashboard" && route !== "sessions" ? (
+            {route === "session" ? (
+              <SessionDetailView
+                events={sessionDetailEvents}
+                eventsError={sessionDetailError}
+                eventsLoading={sessionDetailLoading}
+                memories={data.memories}
+                onBack={() => setRoute("sessions")}
+                onRetryEvents={() => setSessionDetailReloadKey((key) => key + 1)}
+                session={selectedSession}
+              />
+            ) : null}
+            {route !== "dashboard" && route !== "sessions" && route !== "session" ? (
               <RoutePlaceholder
                 route={route}
                 selectedSession={selectedSession}
-                eventsBySession={data.eventsBySession}
-                onRouteChange={setRoute}
               />
             ) : null}
           </>
@@ -157,26 +204,12 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
 
 function RoutePlaceholder({
   route,
-  selectedSession,
-  eventsBySession,
-  onRouteChange
+  selectedSession
 }: {
   route: AppRoute;
   selectedSession: SessionRecord | null;
-  eventsBySession: Map<string, import("@signal-recycler/shared").TimelineEvent[]>;
-  onRouteChange: (route: AppRoute) => void;
 }) {
-  if (route === "session") {
-    return (
-      <SessionPlaceholder
-        session={selectedSession}
-        events={selectedSession ? (eventsBySession.get(selectedSession.id) ?? []) : []}
-        onRouteChange={onRouteChange}
-      />
-    );
-  }
-
-  if (route === "dashboard" || route === "sessions") return null;
+  if (route === "dashboard" || route === "sessions" || route === "session") return null;
 
   const copy: Record<Exclude<AppRoute, "dashboard" | "sessions" | "session">, { title: string; body: string }> = {
     memory: {
@@ -205,51 +238,10 @@ function RoutePlaceholder({
   return (
     <PlaceholderFrame title={content.title}>
       <p>{content.body}</p>
+      {selectedSession ? (
+        <p className="mt-3 font-mono text-xs text-stone-400">Current session selection: {selectedSession.id}</p>
+      ) : null}
     </PlaceholderFrame>
-  );
-}
-
-function SessionPlaceholder({
-  session,
-  events,
-  onRouteChange
-}: {
-  session: SessionRecord | null;
-  events: import("@signal-recycler/shared").TimelineEvent[];
-  onRouteChange: (route: AppRoute) => void;
-}) {
-  if (!session) {
-    return (
-      <PlaceholderFrame title="Session detail placeholder">
-        <p>No session is selected yet. Create a new session or open one from the sessions list.</p>
-        <Button className="mt-4" onClick={() => onRouteChange("sessions")}>
-          Open sessions
-        </Button>
-      </PlaceholderFrame>
-    );
-  }
-
-  const summary = summarizeSession(session, events);
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-stone-950">{summary.title}</h1>
-        <p className="mt-1 font-mono text-xs text-stone-500">{session.id}</p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-4">
-        <MetricTile label="Status" value={summary.status.replace("_", " ")} />
-        <MetricTile label="Adapter" value={summary.adapter} />
-        <MetricTile label="Memory in" value={summary.memoryIn} />
-        <MetricTile label="Events" value={summary.eventCount} />
-      </div>
-      <PlaceholderFrame title="Session detail placeholder">
-        <p>
-          This route is now wired to the selected session and live event grouping. Transcript, context envelope,
-          memory, compression, and error tabs are deferred to the session detail view task.
-        </p>
-      </PlaceholderFrame>
-    </div>
   );
 }
 

@@ -1,6 +1,13 @@
 import type { EventCategory, MemoryRetrievalResult, TimelineEvent } from "@signal-recycler/shared";
 import type { TimelineGroup, TimelineGroupId } from "../types";
 
+export type CandidateEventGroup = {
+  id: string;
+  ruleId: string | null;
+  events: TimelineEvent[];
+  primaryEvent: TimelineEvent;
+};
+
 const GROUP_TITLES: Record<TimelineGroupId, string> = {
   agent: "Agent Activity",
   context: "Context Operations",
@@ -39,6 +46,30 @@ export function groupTimelineEvents(events: TimelineEvent[]): TimelineGroup[] {
     title: GROUP_TITLES[id],
     events: groupEvents
   }));
+}
+
+export function groupCandidateEvents(events: TimelineEvent[]): CandidateEventGroup[] {
+  const grouped = new Map<string, TimelineEvent[]>();
+
+  for (const event of events) {
+    if (event.category !== "rule_candidate" && event.category !== "rule_auto_approved") continue;
+    const ruleId = typeof event.metadata["ruleId"] === "string" ? event.metadata["ruleId"] : null;
+    const id = ruleId ?? event.id;
+    grouped.set(id, [...(grouped.get(id) ?? []), event]);
+  }
+
+  return Array.from(grouped.entries()).flatMap(([id, groupEvents]) => {
+    const primaryEvent = groupEvents.find((event) => event.category === "rule_candidate") ?? groupEvents[0];
+    if (!primaryEvent) return [];
+    return [
+      {
+        id,
+        ruleId: typeof groupEvents[0]?.metadata["ruleId"] === "string" ? groupEvents[0].metadata["ruleId"] : null,
+        events: groupEvents,
+        primaryEvent
+      }
+    ];
+  });
 }
 
 export function eventTone(category: EventCategory): "neutral" | "green" | "amber" | "red" | "blue" {

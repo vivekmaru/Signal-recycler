@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "@signal-recycler/shared";
-import { groupTimelineEvents, summarizeMemoryRetrieval } from "./eventPresenters";
+import { groupCandidateEvents, groupTimelineEvents, summarizeMemoryRetrieval } from "./eventPresenters";
 
 const baseEvent = {
   id: "event_1",
@@ -34,5 +34,40 @@ describe("event presenters", () => {
         limit: 5
       })
     ).toBe("Selected 1 · skipped 2 · approved 3");
+  });
+
+  it("deduplicates candidate events by durable rule id", () => {
+    const groups = groupCandidateEvents([
+      {
+        ...baseEvent,
+        id: "candidate_event",
+        category: "rule_candidate",
+        title: "Rule candidate created",
+        body: "Use pnpm.",
+        metadata: { ruleId: "rule_1" }
+      },
+      {
+        ...baseEvent,
+        id: "approved_event",
+        category: "rule_auto_approved",
+        title: "Rule auto-approved",
+        body: "Use pnpm.",
+        metadata: { ruleId: "rule_1" }
+      },
+      {
+        ...baseEvent,
+        id: "missing_rule_id",
+        category: "rule_candidate",
+        title: "Rule candidate created",
+        body: "Use vitest.",
+        metadata: {}
+      }
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => [group.id, group.events.map((event) => event.id)])).toEqual([
+      ["rule_1", ["candidate_event", "approved_event"]],
+      ["missing_rule_id", ["missing_rule_id"]]
+    ]);
   });
 });
