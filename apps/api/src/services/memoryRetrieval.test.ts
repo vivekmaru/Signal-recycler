@@ -169,4 +169,31 @@ describe("memory retrieval", () => {
       result.metrics.approvedMemories
     );
   });
+
+  it("limits the FTS candidate scan to the requested retrieval budget", () => {
+    const store = createStore(":memory:");
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    let observedLimit: number | undefined;
+    const searchApprovedMemories = store.searchApprovedMemories;
+    store.searchApprovedMemories = (input) => {
+      observedLimit = input.limit;
+      return searchApprovedMemories(input);
+    };
+
+    retrieveRelevantMemories({
+      store,
+      projectId: "demo",
+      query: "pnpm test package manager",
+      limit: 1
+    });
+
+    expect(observedLimit).toBe(1);
+  });
 });

@@ -909,7 +909,7 @@ describe("api", () => {
     expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();
   });
 
-  it("does not inject all approved memories when proxy request has no query fields", async () => {
+  it("skips retrieval when proxy request has no query fields", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ ok: true }), { status: 200 })
     );
@@ -943,22 +943,12 @@ describe("api", () => {
     const forwardedText = String(fetchMock.mock.calls[0]?.[1]?.body);
     const forwardedBody = JSON.parse(forwardedText);
     const events = store.listEvents("proxy-missing-query");
-    const retrievalEvent = events.find((event) => event.category === "memory_retrieval");
 
     expect(response.statusCode).toBe(200);
     expect(forwardedBody).toEqual({ metadata: { source: "test" } });
     expect(forwardedText).not.toContain("<signal-recycler-playbook>");
     expect(forwardedText).not.toContain("Use pnpm for package scripts.");
-    expect(retrievalEvent?.metadata).toMatchObject({
-      projectId: TEST_APP_OPTIONS.projectId,
-      query: "",
-      selected: [],
-      skipped: [expect.objectContaining({ memoryId: memory.id })],
-      metrics: expect.objectContaining({
-        selectedMemories: 0,
-        skippedMemories: 1
-      })
-    });
+    expect(events.some((event) => event.category === "memory_retrieval")).toBe(false);
     expect(events.some((event) => event.category === "memory_injection")).toBe(false);
     expect(store.listMemoryUsages(memory.id)).toHaveLength(0);
     expect(store.getRule(memory.id)?.lastUsedAt).toBeNull();

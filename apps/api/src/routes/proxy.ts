@@ -57,12 +57,13 @@ export async function registerProxyRoutes(
       }
     }
 
+    const retrievalQuery = extractProxyQueryText(rawBody);
     const retrieval =
-      rules.length > 0
+      rules.length > 0 && retrievalQuery.length > 0
         ? retrieveRelevantMemories({
             store: options.store,
             projectId: options.projectId,
-            query: extractProxyQueryText(rawBody),
+            query: retrievalQuery,
             limit: 5
           })
         : null;

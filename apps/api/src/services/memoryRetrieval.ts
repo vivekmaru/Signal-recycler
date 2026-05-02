@@ -25,7 +25,7 @@ export function retrieveRelevantMemories(
   const hits = input.store.searchApprovedMemories({
     projectId: input.projectId,
     query: input.query,
-    limit: Math.max(limit, input.store.listRules(input.projectId).length)
+    limit
   });
   const selectedMemories: MemoryRecord[] = [];
   const selectedIds = new Set<string>();
