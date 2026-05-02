@@ -1,8 +1,9 @@
 import { type FastifyInstance } from "fastify";
 import { compressRequestBody } from "../compressor.js";
-import { injectIntoRequestBody, stripPlaybookBlocks } from "../playbook.js";
+import { injectIntoRequestBody } from "../playbook.js";
 import { recordMemoryInjection } from "../services/memoryInjection.js";
 import { retrieveRelevantMemories } from "../services/memoryRetrieval.js";
+import { analyzeProxyRequestContext } from "../services/proxyRequestContext.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
 
@@ -32,7 +33,8 @@ export async function registerProxyRoutes(
     const originalItems = countInputItems(request.body);
 
     let rawBody = request.body;
-    const internalSignalRecyclerRequest = isSignalRecyclerInternalRequest(rawBody);
+    const proxyContext = analyzeProxyRequestContext(rawBody);
+    const internalSignalRecyclerRequest = proxyContext.internalSignalRecyclerRequest;
     let charsRemoved = 0;
     let tokensRemoved = 0;
     let compressions = 0;
@@ -58,7 +60,9 @@ export async function registerProxyRoutes(
       }
     }
 
-    const retrievalQuery = extractProxyQueryText(rawBody);
+    const proxyContextAfterCompression =
+      rawBody === request.body ? proxyContext : analyzeProxyRequestContext(rawBody);
+    const retrievalQuery = proxyContextAfterCompression.query;
     const retrieval =
       !internalSignalRecyclerRequest && rules.length > 0 && retrievalQuery.length > 0
         ? retrieveRelevantMemories({
@@ -77,6 +81,8 @@ export async function registerProxyRoutes(
         metadata: {
           projectId: options.projectId,
           query: retrieval.query,
+          querySource: proxyContextAfterCompression.querySource,
+          strippedPlaybookBlocks: proxyContextAfterCompression.strippedPlaybookBlocks,
           selected: retrieval.selected,
           skipped: retrieval.skipped,
           metrics: retrieval.metrics
@@ -122,10 +128,14 @@ export async function registerProxyRoutes(
         tokensRemoved,
         injectedRules,
         internalSignalRecyclerRequest,
+        querySource: proxyContextAfterCompression.querySource,
+        strippedPlaybookBlocks: proxyContextAfterCompression.strippedPlaybookBlocks,
         ruleIds: injection.injected ? selectedRules.map((r) => r.id) : [],
         retrieval: retrieval
           ? {
               query: retrieval.query,
+              querySource: proxyContextAfterCompression.querySource,
+              strippedPlaybookBlocks: proxyContextAfterCompression.strippedPlaybookBlocks,
               selected: retrieval.selected,
               skipped: retrieval.skipped,
               metrics: retrieval.metrics
@@ -166,6 +176,8 @@ export async function registerProxyRoutes(
             retrieval: retrieval
               ? {
                   query: retrieval.query,
+                  querySource: proxyContextAfterCompression.querySource,
+                  strippedPlaybookBlocks: proxyContextAfterCompression.strippedPlaybookBlocks,
                   selected: retrieval.selected,
                   skipped: retrieval.skipped,
                   metrics: retrieval.metrics
@@ -274,94 +286,6 @@ function injectProxyBody(
   }
   const injectedBody = injectIntoRequestBody(body, rules);
   return { body: injectedBody, injected: !jsonEqual(body, injectedBody) };
-}
-
-function extractProxyQueryText(body: unknown): string {
-  if (body === undefined || body === null) return "";
-  if (typeof body === "string") {
-    try {
-      return extractProxyQueryText(JSON.parse(body) as unknown);
-    } catch {
-      return "";
-    }
-  }
-  if (!isPlainObject(body)) return "";
-
-  const record = body as Record<string, unknown>;
-  const promptParts = [
-    extractUserText(record.input),
-    extractUserText(record.messages)
-  ].filter((part) => part.length > 0);
-
-  if (promptParts.length > 0) return promptParts.join("\n\n");
-  return extractPlainText(record.instructions);
-}
-
-function isSignalRecyclerInternalRequest(body: unknown): boolean {
-  if (!isPlainObject(body)) return false;
-
-  if (hasSignalRecyclerClassifierSchema(body)) return true;
-  return (
-    hasClassifierPromptMarker(body.input) ||
-    hasClassifierPromptMarker(body.messages)
-  );
-}
-
-function hasSignalRecyclerClassifierSchema(body: Record<string, unknown>): boolean {
-  const textFormat = body.text;
-  if (!isPlainObject(textFormat)) return false;
-  const format = textFormat.format;
-  if (!isPlainObject(format)) return false;
-  return format.name === "signal_recycler_classifier";
-}
-
-function hasClassifierPromptMarker(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(hasClassifierPromptMarker);
-  if (!isPlainObject(value)) return false;
-
-  const role = typeof value.role === "string" ? value.role.toLowerCase() : null;
-  if (role !== "system" && role !== "developer") return false;
-
-  const text = [extractPlainText(value.text), extractPlainText(value.content)]
-    .filter((part) => part.length > 0)
-    .join("\n");
-  return text.includes("Classify this Codex turn for Signal Recycler.");
-}
-
-function extractUserText(value: unknown): string {
-  if (typeof value === "string") return cleanRetrievalText(value);
-  if (Array.isArray(value)) {
-    return value.map(extractUserText).filter((part) => part.length > 0).join("\n");
-  }
-  if (!isPlainObject(value)) return "";
-
-  const role = typeof value.role === "string" ? value.role.toLowerCase() : null;
-  if (role && role !== "user") return "";
-
-  const text = extractUserText(value.text);
-  const content = extractUserText(value.content);
-  return [text, content].filter((part) => part.length > 0).join("\n");
-}
-
-function extractPlainText(value: unknown): string {
-  if (typeof value === "string") return cleanRetrievalText(value);
-  if (Array.isArray(value)) {
-    return value.map(extractPlainText).filter((part) => part.length > 0).join("\n");
-  }
-  if (!isPlainObject(value)) return "";
-
-  const parts = [
-    extractPlainText(value.instructions),
-    extractPlainText(value.input),
-    extractPlainText(value.messages),
-    extractPlainText(value.text),
-    extractPlainText(value.content)
-  ];
-  return parts.filter((part) => part.length > 0).join("\n");
-}
-
-function cleanRetrievalText(value: string): string {
-  return stripPlaybookBlocks(value).trim();
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

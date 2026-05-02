@@ -104,6 +104,18 @@ export function stripPlaybookBlocks(text: string): string {
   }
 }
 
+export function countPlaybookBlocks(text: string): number {
+  let count = 0;
+  let cursor = text;
+  while (true) {
+    const start = cursor.indexOf(PLAYBOOK_START);
+    const end = cursor.indexOf(PLAYBOOK_END);
+    if (start === -1 || end === -1 || end < start) return count;
+    count += 1;
+    cursor = cursor.slice(end + PLAYBOOK_END.length);
+  }
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
