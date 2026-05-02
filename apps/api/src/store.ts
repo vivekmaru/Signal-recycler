@@ -319,7 +319,20 @@ export function createStore(path: string) {
              AND rules.project_id = ?
              AND rules.status = 'approved'
              AND rules.superseded_by IS NULL
-           ORDER BY search_score ASC, rules.approved_at ASC, rules.id ASC
+             AND NOT EXISTS (
+               SELECT 1
+               FROM rules AS earlier
+               WHERE earlier.project_id = rules.project_id
+                 AND earlier.status = 'approved'
+                 AND earlier.superseded_by IS NULL
+                 AND earlier.category = rules.category
+                 AND earlier.rule = rules.rule
+                 AND (
+                   earlier.approved_at < rules.approved_at
+                   OR (earlier.approved_at = rules.approved_at AND earlier.id < rules.id)
+                 )
+             )
+           ORDER BY search_score ASC, approved_at ASC, id ASC
            LIMIT ?`
         )
         .all(matchQuery, input.projectId, input.projectId, input.limit) as Array<

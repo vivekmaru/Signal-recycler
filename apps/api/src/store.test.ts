@@ -502,6 +502,43 @@ describe("store", () => {
     expect(results.map((result) => result.memory.id)).toEqual([current.id]);
   });
 
+  it("returns the requested number of unique approved memory matches", () => {
+    const store = createStore(":memory:");
+    const first = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "Duplicate imported compatibility rule."
+      }).id
+    );
+    const second = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm install instead of npm install.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+
+    const results = store.searchApprovedMemories({
+      projectId: "demo",
+      query: "package manager pnpm",
+      limit: 2
+    });
+
+    expect(results.map((result) => result.memory.id)).toEqual([first.id, second.id]);
+    expect(results.map((result) => result.rank)).toEqual([1, 2]);
+  });
+
   it("returns no memories for empty or stopword-only search queries", () => {
     const store = createStore(":memory:");
     store.approveRule(
