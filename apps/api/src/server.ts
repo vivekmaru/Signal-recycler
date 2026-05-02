@@ -29,7 +29,7 @@ const projectId =
 const store = createStore(dbPath);
 const codexSdkAdapter = createCodexSdkAdapter({ store, apiPort: port, projectId, workingDirectory });
 const agentAdapterRegistry = createAgentAdapterRegistry({
-  defaultAdapter: process.env.SIGNAL_RECYCLER_MOCK_CODEX === "1" ? "mock" : "codex_sdk",
+  defaultAdapter: "codex_sdk",
   adapters: { codex_sdk: codexSdkAdapter }
 });
 const app = await createApp({

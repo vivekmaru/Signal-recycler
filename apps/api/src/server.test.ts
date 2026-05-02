@@ -7,6 +7,7 @@ import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
 import { renderPlaybookBlock } from "./playbook.js";
 import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
 
@@ -716,7 +717,18 @@ describe("api", () => {
         run: async () => {
           throw new Error("default runner should not be used");
         }
-      }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_sdk: {
+            id: "codex_sdk",
+            run: async () => {
+              throw new Error("codex sdk adapter should not be used");
+            }
+          }
+        }
+      })
     });
     const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
     const id = session.json().id;
@@ -742,6 +754,66 @@ describe("api", () => {
         })
       ])
     );
+  });
+
+  it("keeps default mock-mode session runs on the Codex SDK adapter compatibility path", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const store = createStore(":memory:");
+    const rule = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package scripts.",
+        reason: "The workspace uses pnpm."
+      }).id
+    );
+    const codexSdkAdapter = createCodexSdkAdapter({
+      store,
+      apiPort: 3001,
+      projectId: TEST_APP_OPTIONS.projectId,
+      workingDirectory: TEST_APP_OPTIONS.workingDirectory
+    });
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: codexSdkAdapter,
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: { codex_sdk: codexSdkAdapter }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: { prompt: "Please run package manager validation with pnpm." }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().finalResponse).toContain("Use pnpm for package scripts.");
+    expect(events.map((event) => event.category)).toEqual(
+      expect.arrayContaining(["proxy_request", "memory_retrieval", "memory_injection"])
+    );
+    expect(events.find((event) => event.category === "proxy_request")).toMatchObject({
+      title: "Codex SDK routed through proxy",
+      metadata: {
+        approvedRulesAvailable: 1,
+        workingDirectory: TEST_APP_OPTIONS.workingDirectory
+      }
+    });
+    expect(events.find((event) => event.category === "memory_injection")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      adapter: "mock-codex",
+      reason: "approved_project_memory",
+      memoryIds: [rule.id],
+      retrieval: expect.objectContaining({
+        query: "Please run package manager validation with pnpm.",
+        metrics: expect.objectContaining({ selectedMemories: 1 })
+      })
+    });
   });
 
   it("uses the app-provided adapter registry for default session runs", async () => {

@@ -9,9 +9,9 @@ Phase 4 Task 4 wraps the existing Codex SDK runner as an owned-session `AgentAda
 - Codex SDK adapter service: moves the existing SDK runner implementation into `createCodexSdkAdapter` with `id: "codex_sdk"` and preserves proxy base URL, optional API key handling, mock path behavior, memory retrieval/injection audit events, and session/workdir thread keys.
 - Compatibility runner export: replaces `codexRunner.ts` with a re-export from the new adapter service.
 - App construction: accepts an optional `agentAdapterRegistry` and passes it through to session routes.
-- Server startup: creates one Codex SDK adapter, registers it as `codex_sdk`, selects `mock` as default only when `SIGNAL_RECYCLER_MOCK_CODEX=1`, and passes both compatibility runner and registry into `createApp`.
+- Server startup: creates one Codex SDK adapter, registers it as `codex_sdk`, keeps `codex_sdk` as the default adapter even when `SIGNAL_RECYCLER_MOCK_CODEX=1`, and passes both compatibility runner and registry into `createApp`.
 - Session routes: forwards the app-provided registry into `processTurn` with parsed adapter selection.
-- Tests: adds route coverage proving default session runs resolve through the app-provided registry instead of the legacy runner fallback.
+- Tests: adds route coverage proving default session runs resolve through the app-provided registry instead of the legacy runner fallback, explicit `mock` selection still works through the registry, and env mock-mode default runs keep the SDK adapter's legacy `mock-codex` audit path.
 
 ## Reviewer Focus Areas
 
@@ -23,11 +23,11 @@ Phase 4 Task 4 wraps the existing Codex SDK runner as an owned-session `AgentAda
 ## Known Non-Blockers And Expected Warnings
 
 - Legacy non-registry fallback paths remain in `processTurn` for compatibility with tests and callers that do not provide a registry.
-- The mock default in server startup is environment-gated by `SIGNAL_RECYCLER_MOCK_CODEX=1`; the Codex SDK adapter still retains its existing internal mock branch for compatibility.
+- Explicit `{ adapter: "mock" }` requests still use the standalone mock adapter; default mock-mode runs stay on the Codex SDK adapter so legacy proxy and `mock-codex` audit events are preserved.
 
 ## Verification Commands And Results
 
-- `pnpm --filter @signal-recycler/api test -- server.test.ts agentAdapters.test.ts contextEnvelope.test.ts`: passed, 16 test files and 121 tests.
+- `pnpm --filter @signal-recycler/api test -- server.test.ts agentAdapters.test.ts contextEnvelope.test.ts`: passed, 16 test files and 122 tests.
 - `pnpm --filter @signal-recycler/api type-check`: passed.
 
 ## Explicit Out-Of-Scope Items
