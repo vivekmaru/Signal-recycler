@@ -222,6 +222,51 @@ describe("api", () => {
     );
   });
 
+  it("does not create duplicate memory from injected memory echoed by the run", async () => {
+    delete process.env.OPENAI_API_KEY;
+    const store = createStore(":memory:");
+    const existing = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "Manual setup rule."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({
+          finalResponse:
+            "Checking learned constraints from playbook... Use pnpm test instead of npm test. Applying rules before proceeding.",
+          items: [{ type: "mock", injected: true }]
+        })
+      }
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const run = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: { prompt: "Run package manager validation for this repo." }
+    });
+    const events = await app.inject({ method: "GET", url: `/api/sessions/${id}/events` });
+
+    expect(run.statusCode).toBe(200);
+    expect(run.json().candidateRules).toEqual([]);
+    expect(store.listRules(TEST_APP_OPTIONS.projectId).map((rule) => rule.id)).toEqual([
+      existing.id
+    ]);
+    expect(events.json().map((event: { category: string }) => event.category)).not.toContain(
+      "rule_candidate"
+    );
+    expect(events.json().map((event: { category: string }) => event.category)).not.toContain(
+      "rule_auto_approved"
+    );
+  });
+
   it("creates manual memories with manual provenance", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
