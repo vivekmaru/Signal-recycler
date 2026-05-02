@@ -549,10 +549,68 @@ function TimelineRow({ event }: { event: TimelineEvent }) {
           </time>
         </div>
         <h3 className="text-sm font-semibold">{event.title}</h3>
+        {event.category === "memory_retrieval" ? <MemoryRetrievalCounts meta={meta} /> : null}
         <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[#4f5a59]">{event.body}</p>
       </div>
     </article>
   );
+}
+
+function MemoryRetrievalCounts({ meta }: { meta: Record<string, unknown> }) {
+  const selected = retrievalCount(meta, "selectedMemories", "selected");
+  const skipped = retrievalCount(meta, "skippedMemories", "skipped");
+  const approved = retrievalCount(meta, "approvedMemories");
+
+  if (selected === null && skipped === null) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {selected !== null ? (
+        <span className="inline-flex rounded bg-[#e9f9a8] px-2 py-1 text-xs font-medium text-[#5d7517]">
+          Selected {selected}
+        </span>
+      ) : null}
+      {skipped !== null ? (
+        <span className="inline-flex rounded bg-[#ece5d8] px-2 py-1 text-xs font-medium text-[#66706c]">
+          Skipped {skipped}
+        </span>
+      ) : null}
+      {approved !== null ? (
+        <span className="inline-flex rounded bg-white/70 px-2 py-1 text-xs font-medium text-[#66706c]">
+          Approved {approved}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function retrievalCount(
+  meta: Record<string, unknown>,
+  metricKey: string,
+  arrayKey?: string
+): number | null {
+  const direct = numberValue(meta[metricKey]);
+  if (direct !== null) return direct;
+
+  const metrics = meta["metrics"];
+  if (metrics && typeof metrics === "object" && !Array.isArray(metrics)) {
+    const metric = numberValue((metrics as Record<string, unknown>)[metricKey]);
+    if (metric !== null) return metric;
+  }
+
+  if (arrayKey) {
+    const value = meta[arrayKey];
+    if (Array.isArray(value)) return value.length;
+  }
+
+  return null;
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const count = Number(value);
+  return Number.isFinite(count) ? count : null;
 }
 
 function ProxyRequestRow({
@@ -670,6 +728,14 @@ function chipStyleForCategory(category: string): {
         dotClass: "bg-[#dc2626]",
         icon: null,
         label: "Candidate memory"
+      };
+    case "memory_retrieval":
+      return {
+        chipClass:
+          "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#e9f9a8] text-[#5d7517] border border-[#cfe065]",
+        dotClass: "bg-[#9db92d]",
+        icon: <Sparkles size={10} />,
+        label: "Memory context"
       };
     default:
       return { chipClass: "event-chip", dotClass: "", icon: null };

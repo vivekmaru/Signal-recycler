@@ -4,7 +4,7 @@
 
 Signal Recycler is moving toward Signal Recycler-owned agent sessions: it stores the observable context around a run, retrieves relevant memory, injects scoped project guidance, streams/audits events, and learns durable memories after the run.
 
-The current v1 implementation is narrower: it provides a local OpenAI-compatible proxy for Codex traffic, compresses selected noisy request items, records telemetry, extracts reusable playbook rules from dashboard runs, and injects approved rules into later proxied requests.
+The current v1 implementation is narrower: it provides a local OpenAI-compatible proxy for Codex traffic, compresses selected noisy request items, records telemetry, extracts reusable playbook rules from dashboard runs, and retrieves relevant approved rules before injecting them into later routed requests.
 
 ## Why this matters
 
@@ -15,8 +15,8 @@ Signal Recycler is designed to fix that with a local memory layer:
 - **Compress selected noise**: trims large shell outputs, stack traces, and error dumps before they are forwarded.
 - **Learn from failures**: classifies completed turns and extracts reusable rule candidates.
 - **Accept proactive rules**: lets you manually add constraints before running Codex.
-- **Inject memory**: prepends approved playbook rules into future requests routed through Signal Recycler.
-- **Show the proof**: the dashboard displays proxy traffic, compression, token savings, injected rules, and the live playbook.
+- **Retrieve memory**: selects relevant approved memories before injection instead of injecting every approved memory.
+- **Show the proof**: the dashboard displays proxy traffic, compression, token savings, retrieval events, injected rules, and the live playbook.
 
 ## Supported run modes
 
@@ -28,7 +28,7 @@ This mode is not fully implemented yet. It is the next major direction after Pha
 
 ### Existing v1: API-compatible proxy adapter
 
-The current app supports an OpenAI-compatible proxy at `/proxy/*`. The proxy can compress selected noisy request items, inject approved playbook rules, forward the transformed request upstream, and record request telemetry.
+The current app supports an OpenAI-compatible proxy at `/proxy/*`. The proxy can compress selected noisy request items, retrieve relevant approved playbook rules, inject the selected rules, forward the transformed request upstream, and record request telemetry.
 
 Proxy mode remains useful for API-compatible agents and custom apps, but it is the existing v1 adapter rather than the main forward roadmap.
 
@@ -39,7 +39,7 @@ The strongest demo is a before-and-after Codex run:
 1. Start Signal Recycler.
 2. Add or auto-learn a playbook rule.
 3. Run a vague Codex prompt.
-4. Watch the proxy inject the rule.
+4. Watch Signal Recycler retrieve and inject the relevant rule.
 5. Confirm Codex behaves according to project memory instead of guessing.
 
 Example proactive-memory demo:
@@ -58,7 +58,7 @@ Example proactive-memory demo:
    Implement a different theme for the UI.
    ```
 
-3. Signal Recycler injects the rule into the Codex request, so Codex follows the linked theme source even though the prompt itself stays intentionally vague.
+3. Signal Recycler retrieves and injects the relevant rule into the Codex request, so Codex follows the linked theme source even though the prompt itself stays intentionally vague.
 
 That is the current product claim: **Codex plus durable project memory can execute intent that a stateless Codex run would have to guess when the request is routed through Signal Recycler.**
 
@@ -71,7 +71,8 @@ Prompt from dashboard or API-compatible client
 Signal Recycler proxy
     |
     |-- compress noisy history
-    |-- inject approved playbook rules
+    |-- retrieve relevant approved playbook rules
+    |-- inject selected memory
     |-- record request telemetry
     v
 OpenAI Responses API
@@ -97,6 +98,8 @@ Signal Recycler stores durable memories locally in SQLite. A memory records:
 - source kind: `manual`, `event`, `synced_file`, `import`, or `source_chunk`
 - confidence: `high`, `medium`, or `low`
 - sync status: `local`, `imported`, `exported`, or `synced`
+
+Memory retrieval uses SQLite FTS5/BM25 over approved local memories and returns a top-k selection for the current prompt. If a prompt has no searchable match, retrieval returns no selected memories rather than falling back to inject-all behavior.
 
 Memory usage audit rows are stored separately from memory records. Every injection records the memory, session, adapter, event, reason, and timestamp.
 
@@ -205,7 +208,7 @@ The installer edits only a marked Signal Recycler block in `~/.codex/config.toml
 The dashboard is the main product surface:
 
 - **Codex traffic**: send prompts through the local Codex runner.
-- **Live context timeline**: see proxied requests, compression results, classifier output, and Codex events.
+- **Live context timeline**: see proxied requests, retrieval decisions, compression results, classifier output, and Codex events.
 - **Active playbook**: approve, reject, and manually add durable rules.
 - **Metrics strip**: request count, compression count, approved rules, and estimated tokens saved.
 
@@ -223,6 +226,7 @@ The dashboard is the main product surface:
 | `POST` | `/api/rules/:id/approve` | Approve a candidate rule. |
 | `POST` | `/api/rules/:id/reject` | Reject a candidate rule. |
 | `GET` | `/api/playbook/export` | Export approved rules as Markdown. |
+| `POST` | `/api/memory/retrieve` | Preview which memories would be selected for a prompt. |
 | `POST` | `/api/memory/reset` | Clear local demo memory for the current project. |
 | `POST` | `/proxy/*` | Proxy OpenAI-compatible Codex traffic. |
 
@@ -232,6 +236,7 @@ The dashboard is the main product surface:
 - `POST /api/memories`: create and approve a manual memory.
 - `POST /api/memories/synced`: import a memory from an `AGENTS.md` or `CLAUDE.md` compatibility block.
 - `GET /api/memories/:id/audit`: return the memory plus usage rows showing where it was injected.
+- `POST /api/memory/retrieve`: preview the approved memories retrieval would select or skip for a prompt. This is a local retrieval preview, not repo indexing or vector search.
 
 Manual memory request:
 
@@ -290,6 +295,7 @@ The local eval command does not call OpenAI. It runs deterministic suites for:
 - compression retention and token savings
 - rule extraction precision and recall
 - playbook injection placement and dedupe
+- lexical memory retrieval relevance, project isolation, stale-memory exclusion, and token reduction versus inject-all
 - project isolation
 - with-memory versus without-memory task outcome
 - stale-memory failure exposure
