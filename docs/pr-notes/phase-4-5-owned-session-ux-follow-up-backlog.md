@@ -6,6 +6,24 @@ Residual risk: Session Detail refetches complete events when the selected sessio
 
 Next action: add a detail-route polling or server-sent event strategy that always uses `/api/sessions/:id/events` as the complete source of truth and backs off when the session is no longer active.
 
+## P1: Terminal-Owned Session Launch
+
+Residual risk: Phase 4.5 now has dashboard-owned session launch, but it does not yet provide a terminal-first owned-session launch flow that can be used naturally from a developer shell.
+
+Next action: design and implement a CLI entry point that creates a Signal Recycler-owned session, assembles the context envelope, launches the selected agent adapter, streams events into the dashboard, and records post-run learning.
+
+## P1: Real Compare And Replay Execution
+
+Residual risk: Session Detail shows disabled Compare and Replay controls, but there is no backed execution path for comparing with-memory versus without-memory runs or replaying a prior session.
+
+Next action: design the compare/replay contract, capture the artifacts needed for deterministic replay where possible, and expose results through Session Detail only when backed by real run data.
+
+## P1: Session Detail Memory Audit Integration
+
+Residual risk: Memory Review loads recorded local injection usage, but Session Detail memory selections still show only durable memory properties and point users to the Memory view for usage audit.
+
+Next action: reuse the Memory Review audit data model in Session Detail when a memory is selected from a candidate or injection event.
+
 ## P1: Harden Superseded Memory Mutation At The API Boundary
 
 Residual risk: the Memory Review UI disables approve/reject actions for superseded records, but a direct API caller may still attempt mutation unless the backend rejects it explicitly.
@@ -35,3 +53,9 @@ Next action: in Phase 5, implement source indexing with path, line range, hash, 
 Residual risk: the modal has functional controls but does not yet provide a full focus trap, escape-key close behavior, or focus restoration to the opener.
 
 Next action: add focus management tests and implement focus trap, escape handling, and opener focus restoration without changing the owned-session run flow.
+
+## P2: Compact Candidate Lifecycle Rows
+
+Residual risk: Session Detail dedupes candidate lifecycle events by durable rule id, but grouped candidates are still represented by badges and explanatory copy rather than a compact lifecycle table.
+
+Next action: replace repeated lifecycle badges with a small event table if review feedback shows the current card format is hard to scan.

@@ -13,7 +13,7 @@ Success criteria covered by this implementation pass:
 - Memory review surfaces backed by local durable memory records and memory audit data.
 - Preview-only Context Index and Evals screens that do not claim Phase 5 source indexing or connected eval reports.
 
-Explicit next-phase or deferred items remain out of scope: Phase 5 source indexing, vector retrieval, cloud sync, full compare/replay execution, and connected eval report loading.
+Explicit next-phase or deferred items remain out of scope: terminal-owned session launch flows, Phase 5 source indexing, vector retrieval, cloud sync, full compare/replay execution, and connected eval report loading.
 
 ## Scope Summary
 
@@ -36,7 +36,7 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 
 ## Reviewer Focus Areas
 
-- Confirm the UI does not claim retrieval, source indexing, cloud sync, compare/replay execution, or connected eval reports beyond what is implemented.
+- Confirm the UI does not claim source/vector retrieval, source indexing, cloud sync, compare/replay execution, or connected eval reports beyond what is implemented.
 - Confirm Session Detail treats `/api/sessions/:id/events` as authoritative for complete detail history instead of capped dashboard firehose rows.
 - Confirm durable memory provenance, audit, status, supersession, and project isolation remain visible enough for review.
 - Confirm Context Index remains an honest memory retrieval preview and does not imply Phase 5 repository source indexing.
@@ -46,6 +46,9 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 ## Known Non-Blockers And Expected Warnings
 
 - Session Detail refreshes full events through refetching and firehose-count triggers; it is not a streaming subscription.
+- Terminal-owned session launch remains a roadmap follow-up. The implemented New Session flow is dashboard-owned.
+- Compare/replay controls are visible but disabled preview controls; real execution remains a follow-up.
+- Session Detail can inspect loaded memory records, but usage audit history is currently surfaced in Memory Review rather than inside Session Detail.
 - Memory mutation hardening for superseded records is enforced in the UI, but the API should also reject direct approve/reject mutation attempts for superseded records.
 - Evals is intentionally preview-only because no web eval report endpoint is connected.
 - Context Index is intentionally retrieval-preview-only until Phase 5 source indexing exists.
@@ -65,8 +68,10 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 
 - Phase 5 repository/source context indexing with path, line range, hash, timestamp, embeddings, vector search, cosine score, or reranking.
 - Cloud sync, remote memory storage, or owned-session cloud runtime behavior.
+- Terminal-owned session launch and lifecycle UX.
 - Full compare/replay execution for "with memory" versus "without memory" eval runs.
 - Connected eval report loading through a stable web endpoint.
 - Streaming Session Detail event updates.
+- Session Detail memory usage audit history.
 - Backend API hardening for direct superseded-memory mutation attempts.
 - Browser/mobile layout smoke and modal focus polish.
