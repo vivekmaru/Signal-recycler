@@ -38,7 +38,7 @@ export function createCodexCliAdapter(input: {
     id: "codex_cli",
     run(runInput) {
       return new Promise((resolve, reject) => {
-        const child = spawn(command, ["exec", "--json", runInput.prompt], {
+        const child = spawn(command, ["exec", "--json", "--skip-git-repo-check", runInput.prompt], {
           cwd: runInput.workingDirectory,
           env: process.env
         });

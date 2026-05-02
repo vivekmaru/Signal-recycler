@@ -64,6 +64,31 @@ describe("parseCodexJsonLine", () => {
 });
 
 describe("createCodexCliAdapter", () => {
+  it("runs Codex CLI with skip-git-repo-check for non-repo working directories", async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValueOnce(child as never);
+    const adapter = createCodexCliAdapter({
+      store: { createEvent: vi.fn() } as never,
+      command: "codex-test"
+    });
+
+    const run = adapter.run({
+      sessionId: "session-1",
+      prompt: "Run.",
+      workingDirectory: "/tmp/not-a-git-repo"
+    });
+    child.emit("close", 0);
+
+    await expect(run).resolves.toMatchObject({ finalResponse: "", items: [] });
+    expect(spawn).toHaveBeenCalledWith(
+      "codex-test",
+      ["exec", "--json", "--skip-git-repo-check", "Run."],
+      expect.objectContaining({
+        cwd: "/tmp/not-a-git-repo"
+      })
+    );
+  });
+
   it("rejects and kills the child process when event persistence fails", async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValueOnce(child as never);
