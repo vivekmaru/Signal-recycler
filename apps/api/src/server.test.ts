@@ -1600,6 +1600,43 @@ describe("api", () => {
     expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
   });
 
+  it("does not inject an unrelated approved memory from the mock Codex runner", async () => {
+    vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
+    const store = createStore(":memory:");
+    const unrelated = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "theme",
+        rule: "Use approved theme tokens for UI changes.",
+        reason: "Theme work follows the design system."
+      }).id
+    );
+    const runner = createCodexRunner({
+      store,
+      apiPort: 3001,
+      projectId: TEST_APP_OPTIONS.projectId,
+      workingDirectory: TEST_APP_OPTIONS.workingDirectory
+    });
+
+    const result = await runner.run({
+      sessionId: "codex-runner-no-relevant-memory",
+      prompt: "Run package manager validation for this repo."
+    });
+    const events = store.listEvents("codex-runner-no-relevant-memory");
+
+    expect(result.finalResponse).not.toContain("Use approved theme tokens");
+    expect(result.items).toEqual([
+      { type: "mock", injected: "Run package manager validation for this repo." }
+    ]);
+    expect(events.find((event) => event.category === "memory_retrieval")?.metadata).toMatchObject({
+      selected: [],
+      skipped: [expect.objectContaining({ memoryId: unrelated.id })],
+      metrics: expect.objectContaining({ selectedMemories: 0, skippedMemories: 1 })
+    });
+    expect(events.some((event) => event.category === "memory_injection")).toBe(false);
+    expect(store.listMemoryUsages(unrelated.id)).toHaveLength(0);
+  });
+
   it("does not fail mock Codex runs when memory audit persistence fails", async () => {
     vi.stubEnv("SIGNAL_RECYCLER_MOCK_CODEX", "1");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
