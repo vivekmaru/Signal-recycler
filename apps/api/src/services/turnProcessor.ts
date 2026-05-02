@@ -1,8 +1,14 @@
-import { type AgentAdapter, type CandidateRule, type MemoryRecord } from "@signal-recycler/shared";
+import {
+  type AgentAdapter as AgentAdapterId,
+  type CandidateRule,
+  type MemoryRecord
+} from "@signal-recycler/shared";
 import { classifyTurn } from "../classifier.js";
 import { type SignalRecyclerStore } from "../store.js";
-import { type CodexRunner } from "../types.js";
+import { type AgentAdapter, type AgentRunResult, type CodexRunner } from "../types.js";
 import { buildContextEnvelope } from "./contextEnvelope.js";
+import { type AgentAdapterRegistry } from "./agentAdapters.js";
+import { createMockAdapter } from "./mockAdapter.js";
 
 export type ProcessTurnInput = {
   store: SignalRecyclerStore;
@@ -10,7 +16,9 @@ export type ProcessTurnInput = {
   projectId: string;
   sessionId: string;
   prompt: string;
-  adapter?: AgentAdapter;
+  adapter?: AgentAdapterId;
+  agentAdapter?: AgentAdapter;
+  agentAdapterRegistry?: AgentAdapterRegistry;
   workingDirectory?: string;
   classifyTitle?: string;
 };
@@ -99,7 +107,15 @@ export async function processTurn(input: ProcessTurnInput): Promise<{
 
 async function runTurn(
   input: ProcessTurnInput
-): Promise<{ finalResponse: string; items: unknown[] }> {
+): Promise<AgentRunResult> {
+  if (input.agentAdapter) {
+    return runAgentAdapter(input, input.agentAdapter);
+  }
+
+  if (input.agentAdapterRegistry) {
+    return runAgentAdapter(input, input.agentAdapterRegistry.resolve(input.adapter ?? "default"));
+  }
+
   switch (input.adapter) {
     case undefined:
     case "default":
@@ -110,16 +126,7 @@ async function runTurn(
         ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
       });
     case "mock":
-      return runMockTurn({
-        ...input,
-        prompt: buildContextEnvelope({
-          store: input.store,
-          projectId: input.projectId,
-          sessionId: input.sessionId,
-          adapter: "mock",
-          prompt: input.prompt
-        }).prompt
-      });
+      return runAgentAdapter(input, createMockAdapter());
     case "codex_cli":
       throw new Error("Agent adapter is not configured: codex_cli");
   }
@@ -128,13 +135,26 @@ async function runTurn(
   throw new Error(`Agent adapter is not configured: ${unhandledAdapter}`);
 }
 
-async function runMockTurn(
-  input: ProcessTurnInput
-): Promise<{ finalResponse: string; items: unknown[] }> {
-  return {
-    finalResponse: "Encountered a failure. The correction should be captured as a durable rule.",
-    items: [{ type: "mock", injected: input.prompt }]
-  };
+async function runAgentAdapter(
+  input: ProcessTurnInput,
+  adapter: AgentAdapter
+): Promise<AgentRunResult> {
+  const prompt =
+    adapter.id === "mock"
+      ? buildContextEnvelope({
+          store: input.store,
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          adapter: "mock",
+          prompt: input.prompt
+        }).prompt
+      : input.prompt;
+
+  return adapter.run({
+    sessionId: input.sessionId,
+    prompt,
+    ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {})
+  });
 }
 
 function isCoveredByApprovedMemory(candidate: CandidateRule, memories: MemoryRecord[]): boolean {
