@@ -39,22 +39,26 @@ export function buildContextEnvelope(input: ContextEnvelopeInput) {
   });
 
   const prompt = injectPlaybookRules(input.prompt, retrieval.memories);
-  recordMemoryInjection({
-    store: input.store,
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    adapter: input.adapter,
-    memories: retrieval.memories,
-    reason: "approved_project_memory",
-    metadata: {
-      retrieval: {
-        query: retrieval.query,
-        selected: retrieval.selected,
-        skipped: retrieval.skipped,
-        metrics: retrieval.metrics
+  try {
+    recordMemoryInjection({
+      store: input.store,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      adapter: input.adapter,
+      memories: retrieval.memories,
+      reason: "approved_project_memory",
+      metadata: {
+        retrieval: {
+          query: retrieval.query,
+          selected: retrieval.selected,
+          skipped: retrieval.skipped,
+          metrics: retrieval.metrics
+        }
       }
-    }
-  });
+    });
+  } catch (error) {
+    console.warn("[signal-recycler] Context envelope memory audit failed", error);
+  }
 
   return {
     prompt,

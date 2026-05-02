@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createStore } from "../store.js";
 import { buildContextEnvelope } from "./contextEnvelope.js";
 
@@ -121,5 +121,47 @@ describe("context envelope", () => {
       }
     });
     expect(store.listMemoryUsages(skipped.id)).toHaveLength(0);
+  });
+
+  it("returns the injected prompt when memory injection audit persistence fails", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const store = createStore(":memory:");
+      const selected = store.approveRule(
+        store.createRuleCandidate({
+          projectId: "demo",
+          category: "package-manager",
+          rule: "Use pnpm for package scripts.",
+          reason: "The workspace uses pnpm."
+        }).id
+      );
+      store.recordMemoryInjectionEvent = () => {
+        throw new Error("audit store unavailable");
+      };
+
+      const result = buildContextEnvelope({
+        store,
+        projectId: "demo",
+        sessionId: "session-audit-failure",
+        adapter: "mock",
+        prompt: "Please run package manager validation with pnpm."
+      });
+
+      expect(result.prompt).toContain("Use pnpm for package scripts.");
+      expect(result.memoryIds).toEqual([selected.id]);
+      expect(result.retrieval.selected).toEqual([
+        expect.objectContaining({ memoryId: selected.id })
+      ]);
+      expect(store.listEvents("session-audit-failure").map((event) => event.category)).toEqual([
+        "memory_retrieval"
+      ]);
+      expect(store.listMemoryUsages(selected.id)).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(
+        "[signal-recycler] Context envelope memory audit failed",
+        expect.any(Error)
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
