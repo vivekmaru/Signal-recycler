@@ -34,4 +34,18 @@ describe("scenario eval", () => {
     expect(process.env.OPENAI_API_KEY).toBe("sk-test-present-in-dev-shell");
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("proves retrieved memory protects the command outcome from stale memory", async () => {
+    const result = await runScenarioEval();
+    const stale = result.cases.find(
+      (testCase) => testCase.id === "scenario.stale-memory-exposure"
+    );
+
+    expect(stale?.status).toBe("pass");
+    expect(stale?.details).toMatchObject({
+      withRetrievedMemory: { command: "pnpm test", passed: true },
+      withStaleMemory: { command: "npm test", passed: false },
+      withInjectAllMemory: { command: "npm test", passed: false }
+    });
+  });
 });

@@ -14,4 +14,19 @@ describe("retrieval eval", () => {
       ["retrieval.no-query-no-inject-all", "pass"]
     ]);
   });
+
+  it("requires token reduction to keep the useful memory and skip unrelated memory", () => {
+    const result = runRetrievalEval();
+    const tokenReduction = result.cases.find(
+      (testCase) => testCase.id === "retrieval.token-reduction"
+    );
+
+    expect(tokenReduction?.status).toBe("pass");
+    expect(tokenReduction?.details).toMatchObject({
+      relevantMemorySelected: true,
+      unrelatedMemorySkipped: true,
+      selectedMemoryIds: expect.arrayContaining([expect.any(String)]),
+      skippedMemoryIds: expect.arrayContaining([expect.any(String)])
+    });
+  });
 });

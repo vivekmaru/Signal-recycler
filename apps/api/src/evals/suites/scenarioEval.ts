@@ -69,6 +69,17 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
   )
     ? 1
     : 0;
+  const retrievedMemoryPrompt = injectPlaybookRules(prompt, staleMemoryRetrieval.memories);
+  const staleMemoryPrompt = injectPlaybookRules(prompt, [staleRule]);
+  const legacyInjectAllPrompt = injectPlaybookRules(prompt, [staleRule, currentRule]);
+  const withRetrievedMemory = simulatePackageManagerAgent(retrievedMemoryPrompt);
+  const withStaleMemory = simulatePackageManagerAgent(staleMemoryPrompt);
+  const withInjectAllMemory = simulatePackageManagerAgent(legacyInjectAllPrompt);
+  const staleMemoryOutcomeProtected =
+    staleMemoryFailures === 0 &&
+    withRetrievedMemory.passed &&
+    !withStaleMemory.passed &&
+    !withInjectAllMemory.passed;
 
   return suiteResult({
     id: "scenario",
@@ -95,13 +106,18 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
       {
         id: "scenario.stale-memory-exposure",
         title: "Retrieval skips superseded stale memory",
-        status: staleMemoryFailures === 0 ? "pass" : "fail",
-        summary: `stale_memory_failures=${staleMemoryFailures}`,
+        status: staleMemoryOutcomeProtected ? "pass" : "fail",
+        summary:
+          `retrieved=${withRetrievedMemory.command}, stale=${withStaleMemory.command}, ` +
+          `injectAll=${withInjectAllMemory.command}`,
         metrics: [metric("stale_memory_failures", staleMemoryFailures, "failures")],
         details: {
           staleMemoryId: staleRule.id,
           replacementMemoryId: currentRule.id,
-          selected: staleMemoryRetrieval.selected
+          selected: staleMemoryRetrieval.selected,
+          withRetrievedMemory,
+          withStaleMemory,
+          withInjectAllMemory
         }
       }
     ],
@@ -113,8 +129,16 @@ export async function runScenarioEval(): Promise<EvalSuiteResult> {
   });
 }
 
-function simulatePackageManagerAgent(prompt: string): { passed: boolean; command: "npm test" | "pnpm test" } {
-  const command = /pnpm.+instead of.+npm|use pnpm/i.test(prompt) ? "pnpm test" : "npm test";
+function simulatePackageManagerAgent(prompt: string): {
+  passed: boolean;
+  command: "npm test" | "pnpm test";
+} {
+  const commandMatch = prompt.match(/use\s+`?(pnpm|npm)\s+test`?/i);
+  const explicitCommand = commandMatch?.[1]?.toLowerCase();
+  const fallbackPrefersPnpm =
+    explicitCommand === undefined && /pnpm.+instead of.+npm|use pnpm/i.test(prompt);
+  const command =
+    explicitCommand === "pnpm" || fallbackPrefersPnpm ? "pnpm test" : "npm test";
   return { command, passed: command === "pnpm test" };
 }
 

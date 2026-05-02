@@ -16,7 +16,7 @@ export function runRetrievalEval(): EvalSuiteResult {
       reason: "The repo uses pnpm workspaces."
     }).id
   );
-  store.approveRule(
+  const unrelated = store.approveRule(
     store.createRuleCandidate({
       projectId,
       category: "theme",
@@ -67,6 +67,10 @@ export function runRetrievalEval(): EvalSuiteResult {
   const retrievedPrompt = injectPlaybookRules(query, tokenRetrieval.memories);
   const tokensAddedDelta =
     estimateTokensAdded(retrievedPrompt, query) - estimateTokensAdded(injectAllPrompt, query);
+  const selectedMemoryIds = tokenRetrieval.selected.map((decision) => decision.memoryId);
+  const skippedMemoryIds = tokenRetrieval.skipped.map((decision) => decision.memoryId);
+  const relevantMemorySelected = selectedMemoryIds.includes(relevant.id);
+  const unrelatedMemorySkipped = skippedMemoryIds.includes(unrelated.id);
 
   const supersededRetrieval = retrieveRelevantMemories({
     store,
@@ -116,12 +120,19 @@ export function runRetrievalEval(): EvalSuiteResult {
     {
       id: "retrieval.token-reduction",
       title: "Retrieval adds fewer tokens than inject-all",
-      status: tokensAddedDelta < 0 ? "pass" : "fail",
+      status:
+        tokensAddedDelta < 0 && relevantMemorySelected && unrelatedMemorySkipped ? "pass" : "fail",
       summary: `tokens_added_delta_vs_inject_all=${tokensAddedDelta}`,
       metrics: [metric("tokens_added_delta_vs_inject_all", tokensAddedDelta, "tokens")],
       details: {
         injectAllMemories: store.listApprovedRules(projectId).length,
-        retrievedMemories: tokenRetrieval.memories.length
+        retrievedMemories: tokenRetrieval.memories.length,
+        relevantMemoryId: relevant.id,
+        unrelatedMemoryId: unrelated.id,
+        selectedMemoryIds,
+        skippedMemoryIds,
+        relevantMemorySelected,
+        unrelatedMemorySkipped
       }
     },
     {
