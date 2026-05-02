@@ -2,6 +2,12 @@ import { spawn } from "node:child_process";
 import { type SignalRecyclerStore } from "../store.js";
 import { type AgentAdapter } from "../types.js";
 
+const MAX_EVENT_BODY_LENGTH = 8000;
+const MAX_RAW_METADATA_LENGTH = 8000;
+const MAX_RETAINED_ITEMS = 200;
+const MAX_STDERR_LENGTH = 8000;
+const TRUNCATION_SUFFIX = "\n[truncated]";
+
 type ParsedCodexEvent = {
   kind: "message" | "raw";
   body: string;
@@ -11,13 +17,9 @@ type ParsedCodexEvent = {
 export function parseCodexJsonLine(line: string): ParsedCodexEvent {
   try {
     const raw = JSON.parse(line) as unknown;
-    if (
-      isRecord(raw) &&
-      raw.type === "message" &&
-      raw.role === "assistant" &&
-      typeof raw.content === "string"
-    ) {
-      return { kind: "message", body: raw.content, raw };
+    const assistantMessage = extractAssistantMessage(raw);
+    if (assistantMessage !== null) {
+      return { kind: "message", body: assistantMessage, raw };
     }
 
     return { kind: "raw", body: JSON.stringify(raw), raw };
@@ -42,29 +44,50 @@ export function createCodexCliAdapter(input: {
         });
         const assistantMessages: string[] = [];
         const items: unknown[] = [];
-        const stderrChunks: string[] = [];
+        let stderr = "";
         let stdoutBuffer = "";
         let settled = false;
 
+        const rejectRun = (error: Error, options: { killChild: boolean }) => {
+          if (settled) return;
+          settled = true;
+          if (options.killChild) {
+            try {
+              child.kill();
+            } catch {
+              // Best effort: the child may already be gone or the platform may reject the signal.
+            }
+          }
+          reject(error);
+        };
+
         const emitLine = (line: string) => {
+          if (settled) return;
           if (line.length === 0) return;
 
           const event = parseCodexJsonLine(line);
-          items.push(event.raw);
+          if (items.length < MAX_RETAINED_ITEMS) {
+            items.push(toBoundedRaw(event.raw));
+          }
           if (event.kind === "message") {
             assistantMessages.push(event.body);
           }
-          input.store.createEvent({
-            sessionId: runInput.sessionId,
-            category: "codex_event",
-            title: event.kind === "message" ? "Codex CLI message" : "Codex CLI event",
-            body: event.body,
-            metadata: { adapter: "codex_cli", raw: event.raw }
-          });
+          try {
+            input.store.createEvent({
+              sessionId: runInput.sessionId,
+              category: "codex_event",
+              title: event.kind === "message" ? "Codex CLI message" : "Codex CLI event",
+              body: truncateText(event.body, MAX_EVENT_BODY_LENGTH),
+              metadata: { adapter: "codex_cli", raw: toBoundedRaw(event.raw) }
+            });
+          } catch (error) {
+            rejectRun(asError(error), { killChild: true });
+          }
         };
 
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => {
+          if (settled) return;
           stdoutBuffer += chunk;
           const lines = stdoutBuffer.split(/\r?\n/);
           stdoutBuffer = lines.pop() ?? "";
@@ -73,28 +96,28 @@ export function createCodexCliAdapter(input: {
 
         child.stderr.setEncoding("utf8");
         child.stderr.on("data", (chunk: string) => {
-          stderrChunks.push(chunk);
+          stderr = truncateText(stderr + chunk, MAX_STDERR_LENGTH);
         });
 
         child.on("error", (error) => {
-          if (settled) return;
-          settled = true;
-          reject(error);
+          rejectRun(error, { killChild: false });
         });
 
         child.on("close", (code) => {
           if (settled) return;
-          settled = true;
           emitLine(stdoutBuffer);
+          if (settled) return;
           if (code !== 0) {
-            reject(
+            rejectRun(
               new Error(
-                `codex exec failed with exit code ${code}: ${stderrChunks.join("").trim()}`
-              )
+                `codex exec failed with exit code ${code}: ${stderr.trim()}`
+              ),
+              { killChild: false }
             );
             return;
           }
 
+          settled = true;
           resolve({
             finalResponse: assistantMessages.join("\n"),
             items
@@ -103,6 +126,45 @@ export function createCodexCliAdapter(input: {
       });
     }
   };
+}
+
+function extractAssistantMessage(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+
+  if (
+    value.type === "message" &&
+    value.role === "assistant" &&
+    typeof value.content === "string"
+  ) {
+    return value.content;
+  }
+
+  if (value.type !== "item.completed" || !isRecord(value.item)) return null;
+  if (value.item.type !== "agent_message") return null;
+  if (typeof value.item.text === "string") return value.item.text;
+  if (typeof value.item.content === "string") return value.item.content;
+  return null;
+}
+
+function toBoundedRaw(raw: unknown): unknown {
+  if (typeof raw === "string") return truncateText(raw, MAX_RAW_METADATA_LENGTH);
+
+  const serialized = JSON.stringify(raw);
+  if (serialized.length <= MAX_RAW_METADATA_LENGTH) return raw;
+
+  return {
+    truncated: true,
+    preview: truncateText(serialized, MAX_RAW_METADATA_LENGTH)
+  };
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - TRUNCATION_SUFFIX.length))}${TRUNCATION_SUFFIX}`;
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

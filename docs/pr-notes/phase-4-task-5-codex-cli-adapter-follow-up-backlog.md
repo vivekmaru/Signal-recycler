@@ -2,12 +2,12 @@
 
 ## P1 Verify Local CLI Event Shapes
 
-Residual risk: the parser handles the planned assistant message shape and generic raw events, but local Codex CLI versions may emit additional structured message variants.
+Residual risk: the parser handles verified assistant message shapes, `item.completed` `agent_message`, and generic raw events, but local Codex CLI versions may emit additional structured message variants.
 
 Next action: run an authenticated local `codex exec --json` smoke after review and add parser fixtures for any stable event shapes worth elevating above raw audit events.
 
-## P2 Add Adapter Run Unit Coverage
+## P2 Add Chunk-Boundary Stream Coverage
 
-Residual risk: parser behavior is directly tested, while process spawn behavior is covered by type-checking and code review rather than a mocked child-process test.
+Residual risk: adapter run tests cover persistence failure, retained item caps, and stderr truncation, but do not explicitly split one JSON line across multiple stdout chunks.
 
-Next action: add a small dependency-injected spawn test if future changes touch CLI lifecycle, stderr handling, or chunked stdout parsing.
+Next action: add a mocked child-process test for chunked stdout parsing if future changes touch stream buffering.
