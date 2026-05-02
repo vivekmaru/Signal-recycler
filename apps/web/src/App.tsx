@@ -339,8 +339,8 @@ export function App() {
                 <h2 className="panel-title">Active memory</h2>
                 <p className="panel-copy">
                   {metrics.approvedRules > 0
-                    ? `${metrics.approvedRules} approved memor${metrics.approvedRules === 1 ? "y" : "ies"} auto-injected into routed Codex requests.`
-                    : "Approved memory is injected into future requests routed through Signal Recycler."}
+                    ? `${metrics.approvedRules} approved memor${metrics.approvedRules === 1 ? "y is" : "ies are"} eligible for retrieval and injection when relevant.`
+                    : "Approved memory can be retrieved into future requests routed through Signal Recycler."}
                 </p>
               </div>
               <button
