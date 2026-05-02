@@ -333,6 +333,94 @@ describe("api", () => {
     expect(defaultLimit.json().metrics.limit).toBe(5);
   });
 
+  it("returns 400 for memory retrieval requests without a prompt", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: {}
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memory retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("returns 400 for memory retrieval requests with an invalid limit", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation", limit: 21 }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid memory retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("does not include other-project memories in retrieval previews", async () => {
+    const store = createStore(":memory:");
+    const current = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm test instead of npm test.",
+        reason: "The repo uses pnpm workspaces."
+      }).id
+    );
+    const other = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "other-project",
+        category: "package-manager",
+        rule: "Use npm test for this other project.",
+        reason: "The other repo uses npm."
+      }).id
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/memory/retrieve",
+      payload: { prompt: "run package manager validation", limit: 5 }
+    });
+
+    const selectedIds = response
+      .json()
+      .selected.map((decision: { memoryId: string }) => decision.memoryId);
+    const skippedIds = response
+      .json()
+      .skipped.map((memory: { memoryId: string }) => memory.memoryId);
+    expect(response.statusCode).toBe(200);
+    expect(selectedIds).toEqual([current.id]);
+    expect(selectedIds).not.toContain(other.id);
+    expect(skippedIds).not.toContain(other.id);
+  });
+
   it("returns memory audit trail with source and usages", async () => {
     const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-api-")), "test.sqlite");
     const store = createStore(databasePath);

@@ -73,13 +73,20 @@ export async function registerRuleRoutes(
 
   app.get("/api/rules", async () => options.store.listRules(projectId));
 
-  app.post("/api/memory/retrieve", async (request) => {
-    const parsed = memoryRetrievalRequestSchema.parse(request.body ?? {});
+  app.post("/api/memory/retrieve", async (request, reply) => {
+    const parsed = memoryRetrievalRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "Invalid memory retrieval request",
+        message: parsed.error.issues.map((issue) => issue.message).join("; ")
+      });
+    }
+
     const result = retrieveRelevantMemories({
       store: options.store,
       projectId,
-      query: parsed.prompt,
-      limit: parsed.limit
+      query: parsed.data.prompt,
+      limit: parsed.data.limit
     });
     return {
       query: result.query,
