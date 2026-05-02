@@ -58,6 +58,7 @@ describe("api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
+      availableAdapters: ["default", "mock", "codex_sdk"],
       database: {
         basename: "signal-recycler-smoke.sqlite",
         isSmoke: true

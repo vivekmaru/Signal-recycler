@@ -3,7 +3,9 @@ import type { SessionStatus, SessionSummary } from "../types";
 import { formatDuration } from "./format";
 
 export function summarizeSession(session: SessionRecord, events: TimelineEvent[]): SessionSummary {
-  const sessionEvents = events.filter((event) => event.sessionId === session.id);
+  const sessionEvents = events
+    .filter((event) => event.sessionId === session.id)
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
   const hasError = sessionEvents.some((event) => event.metadata["phase"] === "codex_error" || /failed/i.test(event.title));
   const hasPendingMemory = sessionEvents.some((event) => event.category === "rule_candidate");
   const hasRunning = sessionEvents.some((event) => /running/i.test(event.title));

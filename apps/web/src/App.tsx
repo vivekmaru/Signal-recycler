@@ -188,6 +188,7 @@ export function App() {
       </section>
       {newSessionOpen ? (
         <NewSessionModal
+          availableAdapters={data.config?.availableAdapters ?? ["default"]}
           running={newSessionRunning}
           onCancel={() => setNewSessionOpen(false)}
           onSubmit={(prompt, adapter) => {
@@ -263,14 +264,18 @@ function PlaceholderFrame({ title, children }: { title: string; children: React.
 }
 
 function NewSessionModal({
+  availableAdapters,
   running,
   onCancel,
   onSubmit
 }: {
+  availableAdapters: AgentAdapter[];
   running: boolean;
   onCancel: () => void;
   onSubmit: (prompt: string, adapter: AgentAdapter) => void;
 }) {
+  const options = adapterOptions.filter((option) => availableAdapters.includes(option.value));
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4">
       <form
@@ -309,7 +314,7 @@ function NewSessionModal({
           id="new-session-adapter"
           name="adapter"
         >
-          {adapterOptions.map((option) => (
+          {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

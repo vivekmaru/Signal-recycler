@@ -70,6 +70,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       projectId,
       workingDirectory,
       workingDirectoryBasename: path.basename(workingDirectory),
+      availableAdapters: options.agentAdapterRegistry?.listAvailable() ?? ["default", "mock", "codex_sdk"],
       database: {
         basename: databasePath ? path.basename(databasePath) : null,
         isSmoke: databasePath.includes("smoke")

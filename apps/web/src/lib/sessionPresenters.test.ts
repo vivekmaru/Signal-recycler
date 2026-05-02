@@ -74,6 +74,15 @@ describe("session presenters", () => {
     });
   });
 
+  it("derives duration from chronological event order even when firehose events are newest first", () => {
+    const summary = summarizeSession(session, [
+      event({ id: "e2", category: "codex_event", createdAt: "2026-05-03T00:02:00.000Z" }),
+      event({ id: "e1", category: "codex_event", createdAt: "2026-05-03T00:00:30.000Z" })
+    ]);
+
+    expect(summary.durationLabel).toBe("2m 00s");
+  });
+
   it("ignores malformed token metadata", () => {
     expect(
       deriveTokenDelta([

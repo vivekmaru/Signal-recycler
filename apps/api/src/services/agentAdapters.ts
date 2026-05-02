@@ -6,6 +6,7 @@ type ResolvableAgentAdapter = Exclude<AgentAdapterId, "default">;
 
 export type AgentAdapterRegistry = {
   resolve(id: AgentAdapterId): AgentAdapter;
+  listAvailable(): AgentAdapterId[];
 };
 
 export function createAgentAdapterRegistry(options: {
@@ -19,6 +20,9 @@ export function createAgentAdapterRegistry(options: {
   };
 
   return {
+    listAvailable() {
+      return ["default", ...Object.keys(adapters)] as AgentAdapterId[];
+    },
     resolve(id) {
       const adapterId = id === "default" ? options.defaultAdapter : id;
       const adapter = adapters[adapterId];

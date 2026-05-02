@@ -13,7 +13,9 @@ Success criteria covered by this implementation pass:
 - Memory review surfaces backed by local durable memory records and memory audit data.
 - Preview-only Context Index and Evals screens that do not claim Phase 5 source indexing or connected eval reports.
 
-Explicit next-phase or deferred items remain out of scope: terminal-owned session launch flows, Phase 5 source indexing, vector retrieval, cloud sync, full compare/replay execution, and connected eval report loading.
+Phase 4.5 is not complete after this PR. This is the owned-session dashboard foundation pass. Remaining Phase 4.5 success criteria are tracked as follow-up work: Codex CLI-auth dashboard launch polish, resumable next-envelope previews, terminal-owned session launch, and backed compare/replay execution.
+
+Explicit deferred items remain out of scope for this PR: Phase 5 source indexing, vector retrieval, cloud sync, full compare/replay execution, terminal-owned session launch, and connected eval report loading.
 
 ## Scope Summary
 
@@ -24,9 +26,9 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 ## Subsystem-By-Subsystem Change Map
 
 - App shell and routing: `apps/web/src/App.tsx`, `apps/web/src/components/AppShell.tsx`, and `apps/web/src/types.ts` coordinate local route state, navigation counts, new-session modal state, selected session state, and route placeholders without adding a frontend router dependency.
-- API client: `apps/web/src/api.ts` exposes dashboard data, session creation/run, per-session events, memory audit, memory review actions, and retrieval preview helpers used by the route views.
+- API client: `apps/web/src/api.ts` exposes dashboard data, configured adapters, session creation/run, per-session events, memory audit, memory review actions, and retrieval preview helpers used by the route views.
 - Dashboard and sessions: `apps/web/src/views/DashboardView.tsx`, `apps/web/src/views/SessionsView.tsx`, and `apps/web/src/lib/sessionPresenters.ts` summarize runtime activity from local sessions, events, and durable memory.
-- Session detail: `apps/web/src/views/SessionDetailView.tsx`, `apps/web/src/components/Timeline.tsx`, `apps/web/src/components/InspectorPanel.tsx`, and `apps/web/src/lib/eventPresenters.ts` show complete per-session event history from `/api/sessions/:id/events`, candidate memory groups, context-envelope metadata, and preview-only disabled actions for unsupported replay/compare workflows.
+- Session detail: `apps/web/src/views/SessionDetailView.tsx`, `apps/web/src/components/Timeline.tsx`, `apps/web/src/components/InspectorPanel.tsx`, and `apps/web/src/lib/eventPresenters.ts` show complete per-session event history from `/api/sessions/:id/events`, candidate memory groups, context-envelope retrieval details including selected/skipped ids and reasons, and preview-only disabled actions for unsupported replay/compare workflows.
 - Memory review: `apps/web/src/views/MemoryView.tsx`, `apps/web/src/lib/memoryPresenters.ts`, and shared inspector components list local durable memories, filter by status including superseded records, load memory audit data, and disable mutation actions for superseded rows in the UI.
 - Context Index preview: `apps/web/src/views/ContextIndexView.tsx` calls the implemented memory retrieval preview endpoint and explicitly avoids source chunks, embeddings, vector scores, and reranking claims.
 - Evals preview: `apps/web/src/views/EvalsView.tsx` is read-only and states that no eval report endpoint is connected.
@@ -46,8 +48,8 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 ## Known Non-Blockers And Expected Warnings
 
 - Session Detail refreshes full events through refetching and firehose-count triggers; it is not a streaming subscription.
-- Terminal-owned session launch remains a roadmap follow-up. The implemented New Session flow is dashboard-owned.
-- Compare/replay controls are visible but disabled preview controls; real execution remains a follow-up.
+- Terminal-owned session launch remains a Phase 4.5 follow-up. The implemented New Session flow is dashboard-owned.
+- Compare/replay controls are visible but disabled preview controls; real execution remains a Phase 4.5 follow-up.
 - Session Detail can inspect loaded memory records, but usage audit history is currently surfaced in Memory Review rather than inside Session Detail.
 - Memory mutation hardening for superseded records is enforced in the UI, but the API should also reject direct approve/reject mutation attempts for superseded records.
 - Evals is intentionally preview-only because no web eval report endpoint is connected.
@@ -57,11 +59,11 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 
 ## Verification Commands And Results
 
-- `pnpm --filter @signal-recycler/web test`: passed. Vitest reported 3 test files passed and 11 tests passed.
+- `pnpm --filter @signal-recycler/web test`: passed. Vitest reported 3 test files passed and 12 tests passed.
 - `pnpm --filter @signal-recycler/web type-check`: passed. `tsc -p tsconfig.json --noEmit` exited 0 for `apps/web`.
-- `pnpm test`: passed. Workspace test run reported `packages/shared` no tests with `--passWithNoTests`, `apps/web` 3 files and 11 tests passed, and `apps/api` 17 files and 137 tests passed.
+- `pnpm test`: passed. Workspace test run reported `packages/shared` no tests with `--passWithNoTests`, `apps/web` 3 files and 12 tests passed, and `apps/api` 17 files and 137 tests passed.
 - `pnpm type-check`: passed. Workspace type-check completed for `packages/shared`, `apps/web`, and `apps/api`.
-- `pnpm build`: passed. Workspace build completed for `packages/shared`, `apps/api`, and `apps/web`; Vite built 1718 modules and emitted `dist/index.html`, `dist/assets/index-CvF7CtH7.css`, and `dist/assets/index-BJOXtznz.js`.
+- `pnpm build`: passed. Workspace build completed for `packages/shared`, `apps/api`, and `apps/web`; Vite built 1718 modules and emitted `dist/index.html`, `dist/assets/index-CvF7CtH7.css`, and `dist/assets/index-CnOrrsz1.js`.
 - `rg -n "Codex traffic|Run end-to-end demo|Use from your terminal|approved-memory|approved memory|Approved memory|Approved Memory" apps/web/src/App.tsx`: no matches. Command exited 1 because ripgrep found no obsolete strings.
 - `SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev`: passed for local serving. Vite served `http://127.0.0.1:5173/`, the API served `http://127.0.0.1:3001`, and `/health` returned `{"ok":true}`.
 - Local mock session smoke: passed. A mock session run returned 5 complete session events from `/api/sessions/:id/events`, including `codex_event`, `memory_retrieval`, `memory_injection`, and `classifier_result`.
@@ -74,6 +76,7 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 - Cloud sync, remote memory storage, or owned-session cloud runtime behavior.
 - Terminal-owned session launch and lifecycle UX.
 - Full compare/replay execution for "with memory" versus "without memory" eval runs.
+- Full Phase 4.5 completion. This PR is the dashboard foundation pass, not the terminal launch or compare/replay execution pass.
 - Connected eval report loading through a stable web endpoint.
 - Streaming Session Detail event updates.
 - Session Detail memory usage audit history.

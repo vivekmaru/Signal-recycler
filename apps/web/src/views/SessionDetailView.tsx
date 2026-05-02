@@ -318,10 +318,14 @@ function ContextMetadata({ event }: { event: TimelineEvent }) {
     const metrics = metadataRecord(event.metadata["metrics"]);
 
     return (
-      <div className="mt-3 grid gap-3 lg:grid-cols-3">
-        <MetadataBlock label="Selected" value={String(selected.length)} />
-        <MetadataBlock label="Skipped" value={String(skipped.length)} />
-        <MetadataBlock label="Limit" value={metadataScalar(metrics["limit"]) ?? "unknown"} />
+      <div className="mt-3 space-y-3">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <MetadataBlock label="Selected" value={String(selected.length)} />
+          <MetadataBlock label="Skipped" value={String(skipped.length)} />
+          <MetadataBlock label="Limit" value={metadataScalar(metrics["limit"]) ?? "unknown"} />
+        </div>
+        <RetrievalDecisionList label="Selected memory" records={selected} />
+        <RetrievalDecisionList label="Skipped memory" records={skipped} />
       </div>
     );
   }
@@ -434,6 +438,37 @@ function MetadataBlock({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
       <div className="mt-1 truncate font-mono text-sm text-stone-900">{value}</div>
+    </div>
+  );
+}
+
+function RetrievalDecisionList({ label, records }: { label: string; records: Array<Record<string, unknown>> }) {
+  if (records.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
+      <div className="mt-2 space-y-2">
+        {records.map((record, index) => (
+          <div className="min-w-0 text-xs leading-5 text-stone-600" key={`${label}-${index}`}>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="font-mono font-semibold text-stone-900">
+                {metadataScalar(record["memoryId"]) ?? "unknown-memory"}
+              </span>
+              {metadataScalar(record["rank"]) ? <Badge>rank {metadataScalar(record["rank"])}</Badge> : null}
+              {metadataScalar(record["score"]) ? <Badge>score {metadataScalar(record["score"])}</Badge> : null}
+              {metadataScalar(record["reason"]) ? <Badge tone="amber">{metadataScalar(record["reason"])}</Badge> : null}
+            </div>
+            {metadataScalar(record["category"]) || metadataScalar(record["memoryType"]) ? (
+              <div className="mt-1 font-mono text-stone-500">
+                {[metadataScalar(record["category"]), metadataScalar(record["memoryType"])]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

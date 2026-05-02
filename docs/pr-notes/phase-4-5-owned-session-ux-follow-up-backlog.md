@@ -34,7 +34,19 @@ Next action: add server-side guards and regression tests for approving or reject
 
 Residual risk: unit tests, type-check, build, and local dev/API smoke pass, but desktop and narrow viewport rendering were not screenshot-tested because the workspace does not include a Playwright/browser automation binary.
 
-Next action: add a browser automation dependency or use the available in-app browser, then run a visual smoke covering Dashboard, Sessions, Session Detail, Memory Review, Context Index preview, Evals preview, and New Session modal at desktop and mobile widths.
+Next action: add a browser automation dependency or use the available in-app browser, then run a visual smoke covering Dashboard, Sessions, Session Detail, Memory Review, Context Index preview, Evals preview, New Session modal adapter filtering, and dense selected/skipped retrieval metadata at desktop and mobile widths.
+
+## P2: Add Adapter Availability UI Coverage
+
+Residual risk: `/api/config` now exposes available adapters and the New Session modal filters unavailable adapters, but this behavior is covered by API/type/build checks rather than a component or browser test.
+
+Next action: add a lightweight UI test or browser smoke that starts without `SIGNAL_RECYCLER_CODEX_CLI=1` and verifies the Codex CLI option is absent, then starts with the flag and verifies the option is present.
+
+## P2: Add Registry Availability Tests
+
+Residual risk: `listAvailable()` currently reflects registry construction and always includes `default`, which matches current server wiring. Future alternate default-adapter wiring could accidentally expose a default that resolves to an unavailable adapter.
+
+Next action: add direct tests for `createAgentAdapterRegistry().listAvailable()` that cover default resolution, optional Codex CLI registration, and unavailable adapter exclusion.
 
 ## P1: Add A Stable Eval Report Endpoint
 

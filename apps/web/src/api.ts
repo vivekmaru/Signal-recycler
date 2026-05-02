@@ -12,6 +12,7 @@ export type ApiConfig = {
   projectId: string;
   workingDirectory: string;
   workingDirectoryBasename: string;
+  availableAdapters: AgentAdapter[];
   database: {
     basename: string | null;
     isSmoke: boolean;
