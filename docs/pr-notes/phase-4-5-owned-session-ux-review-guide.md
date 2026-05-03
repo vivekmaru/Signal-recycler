@@ -40,6 +40,8 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 
 - Confirm the UI does not claim source/vector retrieval, source indexing, cloud sync, compare/replay execution, or connected eval reports beyond what is implemented.
 - Confirm Session Detail treats `/api/sessions/:id/events` as authoritative for complete detail history instead of capped dashboard firehose rows.
+- Confirm Dashboard and Sessions summaries use complete project event history, while only explicit `limit=0` firehose requests bypass pagination.
+- Confirm dashboard polling updates successful data slices even when one API slice temporarily fails.
 - Confirm durable memory provenance, audit, status, supersession, and project isolation remain visible enough for review.
 - Confirm Context Index remains an honest memory retrieval preview and does not imply Phase 5 repository source indexing.
 - Confirm disabled or preview-only controls are visibly unavailable and do not look like failed actions.
@@ -61,10 +63,11 @@ Task 9 also scanned `apps/web/src/App.tsx` for obsolete old UI strings and code.
 
 - `pnpm --filter @signal-recycler/web test`: passed. Vitest reported 4 test files passed and 16 tests passed.
 - `pnpm --filter @signal-recycler/web type-check`: passed. `tsc -p tsconfig.json --noEmit` exited 0 for `apps/web`.
-- `pnpm --filter @signal-recycler/api test -- src/store.test.ts src/server.test.ts`: passed. Vitest reported 17 API test files passed and 142 tests passed, including project-scoped source-event provenance and complete project event-history regressions.
-- `pnpm test`: passed. Workspace test run reported `packages/shared` no tests with `--passWithNoTests`, `apps/web` 4 files and 16 tests passed, and `apps/api` 17 files and 142 tests passed.
+- `pnpm --filter @signal-recycler/api test -- src/server.test.ts`: passed. Vitest reported 17 API test files passed and 143 tests passed, including complete project event-history and negative firehose limit regressions.
+- `pnpm --filter @signal-recycler/web type-check`: passed. `tsc -p tsconfig.json --noEmit` exited 0 for `apps/web`.
+- `pnpm test`: passed. Workspace test run reported `packages/shared` no tests with `--passWithNoTests`, `apps/web` 4 files and 16 tests passed, and `apps/api` 17 files and 143 tests passed.
 - `pnpm type-check`: passed. Workspace type-check completed for `packages/shared`, `apps/web`, and `apps/api`.
-- `pnpm build`: passed. Workspace build completed for `packages/shared`, `apps/api`, and `apps/web`; Vite built 1718 modules and emitted `dist/index.html`, `dist/assets/index-CvF7CtH7.css`, and `dist/assets/index-7LCpGGae.js`.
+- `pnpm build`: passed. Workspace build completed for `packages/shared`, `apps/api`, and `apps/web`; Vite built 1718 modules and emitted `dist/index.html`, `dist/assets/index-CvF7CtH7.css`, and `dist/assets/index-C9bbNOMr.js`.
 - `rg -n "Codex traffic|Run end-to-end demo|Use from your terminal|approved-memory|approved memory|Approved memory|Approved Memory" apps/web/src/App.tsx`: no matches. Command exited 1 because ripgrep found no obsolete strings.
 - `SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev`: passed for local serving. Vite served `http://127.0.0.1:5173/`, the API served `http://127.0.0.1:3001`, and `/health` returned `{"ok":true}`.
 - Local mock session smoke: passed. A mock session run returned 5 complete session events from `/api/sessions/:id/events`, including `codex_event`, `memory_retrieval`, `memory_injection`, and `classifier_result`.

@@ -203,10 +203,11 @@ export function createStore(path: string) {
         WHERE sessions.project_id = ?
            OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
         ORDER BY events.created_at DESC`;
-      if (limit <= 0) {
+      if (limit === 0) {
         return db.prepare(query).all(projectId, projectId).map(mapEvent);
       }
-      return db.prepare(`${query} LIMIT ?`).all(projectId, projectId, limit).map(mapEvent);
+      const normalizedLimit = Math.max(1, Math.floor(limit));
+      return db.prepare(`${query} LIMIT ?`).all(projectId, projectId, normalizedLimit).map(mapEvent);
     },
 
     createRuleCandidate(input: CreateRuleInput): PlaybookRule {

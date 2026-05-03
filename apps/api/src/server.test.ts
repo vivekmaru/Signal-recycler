@@ -165,6 +165,35 @@ describe("api", () => {
     );
   });
 
+  it("normalizes negative firehose limits instead of returning all project events", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Negative limit"
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: `Project event ${index}`,
+        body: "Visible in normalized limited dashboard event history"
+      });
+    }
+
+    const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=-1" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toHaveLength(1);
+  });
+
   it("lists only sessions for the current project", async () => {
     const store = createStore(":memory:");
     const app = await createApp({

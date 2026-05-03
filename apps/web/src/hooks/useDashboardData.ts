@@ -17,28 +17,31 @@ export function useDashboardData() {
   const refresh = useCallback(async () => {
     const refreshId = latestRefreshIdRef.current + 1;
     latestRefreshIdRef.current = refreshId;
-    let nextConfig: ApiConfig;
-    let nextSessions: SessionRecord[];
-    let nextEvents: TimelineEvent[];
-    let nextMemories: MemoryRecord[];
 
-    try {
-      [nextConfig, nextSessions, nextEvents, nextMemories] = await Promise.all([
-        fetchConfig(),
-        listSessions(),
-        listFirehose(0),
-        listMemories()
-      ]);
-    } catch (refreshError: unknown) {
-      if (mountedRef.current && refreshId === latestRefreshIdRef.current) throw refreshError;
-      return;
-    }
-
+    const [configResult, sessionsResult, eventsResult, memoriesResult] = await Promise.allSettled([
+      fetchConfig(),
+      listSessions(),
+      listFirehose(0),
+      listMemories()
+    ] as const);
     if (!mountedRef.current || refreshId !== latestRefreshIdRef.current) return;
-    setConfig(nextConfig);
-    setSessions(nextSessions);
-    setEvents(nextEvents);
-    setMemories(nextMemories);
+
+    const failures: string[] = [];
+    if (configResult.status === "fulfilled") setConfig(configResult.value);
+    else failures.push(`config: ${errorMessage(configResult.reason)}`);
+
+    if (sessionsResult.status === "fulfilled") setSessions(sessionsResult.value);
+    else failures.push(`sessions: ${errorMessage(sessionsResult.reason)}`);
+
+    if (eventsResult.status === "fulfilled") setEvents(eventsResult.value);
+    else failures.push(`events: ${errorMessage(eventsResult.reason)}`);
+
+    if (memoriesResult.status === "fulfilled") setMemories(memoriesResult.value);
+    else failures.push(`memory: ${errorMessage(memoriesResult.reason)}`);
+
+    if (failures.length > 0) {
+      throw new Error(`Dashboard refresh partially failed: ${failures.join("; ")}`);
+    }
   }, []);
 
   useEffect(() => {
