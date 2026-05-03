@@ -17,6 +17,7 @@ const TEST_APP_OPTIONS = {
 } as const;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -58,6 +59,7 @@ describe("api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
+      availableAdapters: ["default", "mock", "codex_sdk"],
       database: {
         basename: "signal-recycler-smoke.sqlite",
         isSmoke: true
@@ -115,6 +117,117 @@ describe("api", () => {
     const titles = response.json().map((event: { title: string }) => event.title);
     expect(titles).toEqual(expect.arrayContaining(["Tracked event", "Current proxy event"]));
     expect(titles).not.toEqual(expect.arrayContaining(["Other project event", "Other proxy event"]));
+  });
+
+  it("returns all project events when firehose limit is zero", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Complete history"
+    });
+    const otherSession = store.createSession({
+      projectId: "other-project",
+      title: "Other complete history"
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: `Project event ${index}`,
+        body: "Visible in complete dashboard event history"
+      });
+    }
+    store.createEvent({
+      sessionId: otherSession.id,
+      category: "codex_event",
+      title: "Other project event",
+      body: "Hidden from this dashboard"
+    });
+
+    const limited = await app.inject({ method: "GET", url: "/api/firehose/events?limit=2" });
+    const complete = await app.inject({ method: "GET", url: "/api/firehose/events?limit=0" });
+
+    expect(limited.statusCode).toBe(200);
+    expect(limited.json()).toHaveLength(2);
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json().map((event: { title: string }) => event.title)).toEqual(
+      expect.arrayContaining(["Project event 0", "Project event 1", "Project event 2"])
+    );
+    expect(complete.json().map((event: { title: string }) => event.title)).not.toContain(
+      "Other project event"
+    );
+  });
+
+  it("normalizes negative firehose limits instead of returning all project events", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Negative limit"
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: `Project event ${index}`,
+        body: "Visible in normalized limited dashboard event history"
+      });
+    }
+
+    const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=-1" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toHaveLength(1);
+  });
+
+  it("orders same-timestamp project firehose events by newest inserted first", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-03T00:00:00.000Z"));
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Stable order"
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: `Project event ${index}`,
+        body: "Visible in stable dashboard event history"
+      });
+    }
+
+    const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=3" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().map((event: { title: string }) => event.title)).toEqual([
+      "Project event 2",
+      "Project event 1",
+      "Project event 0"
+    ]);
   });
 
   it("lists only sessions for the current project", async () => {

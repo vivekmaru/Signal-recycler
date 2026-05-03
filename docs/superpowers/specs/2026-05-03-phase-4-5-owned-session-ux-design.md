@@ -329,21 +329,6 @@ Initial Phase 4.5 fields:
 
 The default adapter should prefer `codex_cli` when `SIGNAL_RECYCLER_CODEX_CLI=1` and Codex CLI is available, because that path uses existing Codex auth/subscription and does not require an OpenAI API key.
 
-## Phase 4.5 Implementation Shape
-
-Recommended implementation order:
-
-1. Build the app shell and navigation.
-2. Convert existing dashboard data into the new Dashboard overview.
-3. Add Sessions list from existing session/event data.
-4. Build Session Detail with grouped timeline and inspector.
-5. Build Memory table and inspector from existing memory APIs.
-6. Add Context Envelope tab from retrieval/injection event metadata.
-7. Add light Context Index and Evals pages with honest preview/read-only behavior.
-8. Wire New Session to the existing `/api/sessions/:id/run` flow with adapter selection.
-
-This order keeps the product useful throughout the implementation and avoids blocking the whole redesign on future indexing or eval UI work.
-
 ## Design Adjustments From Mockups
 
 - Rename "Tokens saved" to `Token delta` or `Net context`.

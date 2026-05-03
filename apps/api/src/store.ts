@@ -197,18 +197,17 @@ export function createStore(path: string) {
     },
 
     listAllEventsForProject(projectId: string, limit = 100): TimelineEvent[] {
-      return db
-        .prepare(
-          `SELECT events.*
-           FROM events
-           LEFT JOIN sessions ON sessions.id = events.session_id
-           WHERE sessions.project_id = ?
-              OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
-           ORDER BY events.created_at DESC
-           LIMIT ?`
-        )
-        .all(projectId, projectId, limit)
-        .map(mapEvent);
+      const query = `SELECT events.*
+        FROM events
+        LEFT JOIN sessions ON sessions.id = events.session_id
+        WHERE sessions.project_id = ?
+           OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
+        ORDER BY events.created_at DESC, events.rowid DESC`;
+      if (limit === 0) {
+        return db.prepare(query).all(projectId, projectId).map(mapEvent);
+      }
+      const normalizedLimit = Math.max(1, Math.floor(limit));
+      return db.prepare(`${query} LIMIT ?`).all(projectId, projectId, normalizedLimit).map(mapEvent);
     },
 
     createRuleCandidate(input: CreateRuleInput): PlaybookRule {
@@ -225,7 +224,7 @@ export function createStore(path: string) {
         approvedAt: null,
         memoryType: input.memoryType ?? "rule",
         scope: input.scope ?? { type: "project", value: null },
-        source: input.source ?? defaultMemorySource(input.sourceEventId ?? null),
+        source: input.source ?? defaultMemorySource(db, input.projectId, input.sourceEventId ?? null),
         confidence: input.confidence ?? "medium",
         lastUsedAt: null,
         supersededBy: null,
@@ -703,14 +702,30 @@ function backfillEventMemorySources(db: DatabaseSync): void {
     `UPDATE rules
      SET source = json_object(
        'kind', 'event',
-       'sessionId', COALESCE(
-         (SELECT events.session_id FROM events WHERE events.id = rules.source_event_id),
-         'unknown'
+       'sessionId', (
+         SELECT events.session_id
+         FROM events
+         LEFT JOIN sessions ON sessions.id = events.session_id
+         WHERE events.id = rules.source_event_id
+           AND (
+             sessions.project_id = rules.project_id
+             OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = rules.project_id)
+           )
        ),
        'eventId', source_event_id
      )
      WHERE source_event_id IS NOT NULL
-       AND source = '{"kind":"manual","author":"local-user"}'`
+       AND source = '{"kind":"manual","author":"local-user"}'
+       AND EXISTS (
+         SELECT 1
+         FROM events
+         LEFT JOIN sessions ON sessions.id = events.session_id
+         WHERE events.id = rules.source_event_id
+           AND (
+             sessions.project_id = rules.project_id
+             OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = rules.project_id)
+           )
+       )`
   ).run();
 }
 
@@ -825,9 +840,28 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function defaultMemorySource(sourceEventId: string | null): MemorySource {
+function defaultMemorySource(
+  db: DatabaseSync,
+  projectId: string,
+  sourceEventId: string | null
+): MemorySource {
   if (sourceEventId) {
-    return { kind: "event", sessionId: "unknown", eventId: sourceEventId };
+    const row = db
+      .prepare(
+        `SELECT events.session_id
+         FROM events
+         LEFT JOIN sessions ON sessions.id = events.session_id
+         WHERE events.id = ?
+           AND (
+             sessions.project_id = ?
+             OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
+           )`
+      )
+      .get(sourceEventId, projectId, projectId) as { session_id?: string } | undefined;
+    if (!row?.session_id) {
+      throw new Error(`Source event not found in project: ${sourceEventId}`);
+    }
+    return { kind: "event", sessionId: String(row.session_id), eventId: sourceEventId };
   }
   return { kind: "manual", author: "local-user" };
 }

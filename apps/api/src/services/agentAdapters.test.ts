@@ -20,4 +20,13 @@ describe("agent adapter registry", () => {
 
     expect(() => registry.resolve("codex_cli")).toThrow("Codex CLI adapter is not configured");
   });
+
+  it("lists only adapters backed by configured implementations", () => {
+    const registry = createAgentAdapterRegistry({
+      defaultAdapter: "mock",
+      adapters: { codex_cli: undefined }
+    });
+
+    expect(registry.listAvailable()).toEqual(["default", "mock"]);
+  });
 });

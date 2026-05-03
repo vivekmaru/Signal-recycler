@@ -18,14 +18,14 @@ describe("store", () => {
       category: "tooling",
       rule: "Use pnpm for package operations.",
       reason: "The npm path failed in the first run.",
-      sourceEventId: session.id
+      sourceEventId: null
     });
     store.createRuleCandidate({
       projectId: "demo",
       category: "style",
       rule: "Keep UI copy terse.",
       reason: "Rejected candidate fixture.",
-      sourceEventId: session.id
+      sourceEventId: null
     });
 
     const approved = store.approveRule(candidate.id);
@@ -82,6 +82,194 @@ describe("store", () => {
     expect(candidate.supersededBy).toBeNull();
     expect(candidate.syncStatus).toBe("local");
     expect(candidate.updatedAt).toBe(candidate.createdAt);
+  });
+
+  it("backfills event memory sources only when the source event belongs to the rule project", () => {
+    const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-store-")), "test.sqlite");
+    const db = new DatabaseSync(databasePath);
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        metadata TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
+
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    db.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1')").run();
+    db.prepare("INSERT INTO sessions (id, project_id, title, created_at) VALUES (?, ?, ?, ?)").run(
+      "session_demo",
+      "demo",
+      "Demo",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare("INSERT INTO sessions (id, project_id, title, created_at) VALUES (?, ?, ?, ?)").run(
+      "session_other",
+      "other",
+      "Other",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO events (id, session_id, category, title, body, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "event_demo",
+      "session_demo",
+      "codex_event",
+      "Demo response",
+      "Use pnpm.",
+      "{}",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO events (id, session_id, category, title, body, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "event_other",
+      "session_other",
+      "codex_event",
+      "Other response",
+      "Use npm.",
+      "{}",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "rule_demo",
+      "demo",
+      "pending",
+      "tooling",
+      "Use pnpm.",
+      "Same project source.",
+      "event_demo",
+      "2026-05-03T00:00:00.000Z",
+      null
+    );
+    db.prepare(
+      `INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "rule_foreign",
+      "demo",
+      "pending",
+      "tooling",
+      "Use pnpm.",
+      "Foreign project source.",
+      "event_other",
+      "2026-05-03T00:00:00.000Z",
+      null
+    );
+    db.close();
+
+    const store = createStore(databasePath);
+
+    expect(store.getRule("rule_demo")?.source).toEqual({
+      kind: "event",
+      sessionId: "session_demo",
+      eventId: "event_demo"
+    });
+    expect(store.getRule("rule_foreign")?.source).toEqual({
+      kind: "manual",
+      author: "local-user"
+    });
+  });
+
+  it("records source event session id for event-derived memory defaults", () => {
+    const store = createStore(":memory:");
+    const session = store.createSession({ projectId: "demo", title: "Demo session" });
+    const event = store.createEvent({
+      sessionId: session.id,
+      category: "codex_event",
+      title: "Codex response",
+      body: "Use pnpm.",
+      metadata: {}
+    });
+
+    const candidate = store.createRuleCandidate({
+      projectId: "demo",
+      category: "tooling",
+      rule: "Use pnpm for package operations.",
+      reason: "The agent observed a package-manager correction.",
+      sourceEventId: event.id
+    });
+
+    expect(candidate.source).toEqual({ kind: "event", sessionId: session.id, eventId: event.id });
+    expect(store.getRule(candidate.id)?.source).toEqual({
+      kind: "event",
+      sessionId: session.id,
+      eventId: event.id
+    });
+  });
+
+  it("records proxy event session id when deriving project-scoped memory provenance", () => {
+    const store = createStore(":memory:");
+    const event = store.createEvent({
+      sessionId: "proxy",
+      category: "codex_event",
+      title: "Proxy response",
+      body: "Use pnpm.",
+      metadata: { projectId: "demo" }
+    });
+
+    const candidate = store.createRuleCandidate({
+      projectId: "demo",
+      category: "tooling",
+      rule: "Use pnpm for package operations.",
+      reason: "The proxy path observed a package-manager correction.",
+      sourceEventId: event.id
+    });
+
+    expect(candidate.source).toEqual({ kind: "event", sessionId: "proxy", eventId: event.id });
+  });
+
+  it("rejects source events from another project when deriving memory provenance", () => {
+    const store = createStore(":memory:");
+    const otherSession = store.createSession({ projectId: "other", title: "Other session" });
+    const otherEvent = store.createEvent({
+      sessionId: otherSession.id,
+      category: "codex_event",
+      title: "Other response",
+      body: "Use npm.",
+      metadata: {}
+    });
+
+    expect(() =>
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "tooling",
+        rule: "Use pnpm for package operations.",
+        reason: "The agent observed a package-manager correction.",
+        sourceEventId: otherEvent.id
+      })
+    ).toThrow(`Source event not found in project: ${otherEvent.id}`);
   });
 
   it("updates rule updatedAt when approving and rejecting", () => {
