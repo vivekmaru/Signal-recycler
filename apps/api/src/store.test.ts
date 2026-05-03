@@ -18,14 +18,14 @@ describe("store", () => {
       category: "tooling",
       rule: "Use pnpm for package operations.",
       reason: "The npm path failed in the first run.",
-      sourceEventId: session.id
+      sourceEventId: null
     });
     store.createRuleCandidate({
       projectId: "demo",
       category: "style",
       rule: "Keep UI copy terse.",
       reason: "Rejected candidate fixture.",
-      sourceEventId: session.id
+      sourceEventId: null
     });
 
     const approved = store.approveRule(candidate.id);
@@ -109,6 +109,49 @@ describe("store", () => {
       sessionId: session.id,
       eventId: event.id
     });
+  });
+
+  it("records proxy event session id when deriving project-scoped memory provenance", () => {
+    const store = createStore(":memory:");
+    const event = store.createEvent({
+      sessionId: "proxy",
+      category: "codex_event",
+      title: "Proxy response",
+      body: "Use pnpm.",
+      metadata: { projectId: "demo" }
+    });
+
+    const candidate = store.createRuleCandidate({
+      projectId: "demo",
+      category: "tooling",
+      rule: "Use pnpm for package operations.",
+      reason: "The proxy path observed a package-manager correction.",
+      sourceEventId: event.id
+    });
+
+    expect(candidate.source).toEqual({ kind: "event", sessionId: "proxy", eventId: event.id });
+  });
+
+  it("rejects source events from another project when deriving memory provenance", () => {
+    const store = createStore(":memory:");
+    const otherSession = store.createSession({ projectId: "other", title: "Other session" });
+    const otherEvent = store.createEvent({
+      sessionId: otherSession.id,
+      category: "codex_event",
+      title: "Other response",
+      body: "Use npm.",
+      metadata: {}
+    });
+
+    expect(() =>
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "tooling",
+        rule: "Use pnpm for package operations.",
+        reason: "The agent observed a package-manager correction.",
+        sourceEventId: otherEvent.id
+      })
+    ).toThrow(`Source event not found in project: ${otherEvent.id}`);
   });
 
   it("updates rule updatedAt when approving and rejecting", () => {

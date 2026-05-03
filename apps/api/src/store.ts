@@ -197,18 +197,16 @@ export function createStore(path: string) {
     },
 
     listAllEventsForProject(projectId: string, limit = 100): TimelineEvent[] {
-      return db
-        .prepare(
-          `SELECT events.*
-           FROM events
-           LEFT JOIN sessions ON sessions.id = events.session_id
-           WHERE sessions.project_id = ?
-              OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
-           ORDER BY events.created_at DESC
-           LIMIT ?`
-        )
-        .all(projectId, projectId, limit)
-        .map(mapEvent);
+      const query = `SELECT events.*
+        FROM events
+        LEFT JOIN sessions ON sessions.id = events.session_id
+        WHERE sessions.project_id = ?
+           OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
+        ORDER BY events.created_at DESC`;
+      if (limit <= 0) {
+        return db.prepare(query).all(projectId, projectId).map(mapEvent);
+      }
+      return db.prepare(`${query} LIMIT ?`).all(projectId, projectId, limit).map(mapEvent);
     },
 
     createRuleCandidate(input: CreateRuleInput): PlaybookRule {
@@ -225,7 +223,7 @@ export function createStore(path: string) {
         approvedAt: null,
         memoryType: input.memoryType ?? "rule",
         scope: input.scope ?? { type: "project", value: null },
-        source: input.source ?? defaultMemorySource(db, input.sourceEventId ?? null),
+        source: input.source ?? defaultMemorySource(db, input.projectId, input.sourceEventId ?? null),
         confidence: input.confidence ?? "medium",
         lastUsedAt: null,
         supersededBy: null,
@@ -825,12 +823,28 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function defaultMemorySource(db: DatabaseSync, sourceEventId: string | null): MemorySource {
+function defaultMemorySource(
+  db: DatabaseSync,
+  projectId: string,
+  sourceEventId: string | null
+): MemorySource {
   if (sourceEventId) {
     const row = db
-      .prepare("SELECT session_id FROM events WHERE id = ?")
-      .get(sourceEventId) as { session_id?: string } | undefined;
-    return { kind: "event", sessionId: String(row?.session_id ?? "unknown"), eventId: sourceEventId };
+      .prepare(
+        `SELECT events.session_id
+         FROM events
+         LEFT JOIN sessions ON sessions.id = events.session_id
+         WHERE events.id = ?
+           AND (
+             sessions.project_id = ?
+             OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
+           )`
+      )
+      .get(sourceEventId, projectId, projectId) as { session_id?: string } | undefined;
+    if (!row?.session_id) {
+      throw new Error(`Source event not found in project: ${sourceEventId}`);
+    }
+    return { kind: "event", sessionId: String(row.session_id), eventId: sourceEventId };
   }
   return { kind: "manual", author: "local-user" };
 }

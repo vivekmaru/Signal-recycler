@@ -26,7 +26,7 @@ export function useDashboardData() {
       [nextConfig, nextSessions, nextEvents, nextMemories] = await Promise.all([
         fetchConfig(),
         listSessions(),
-        listFirehose(250),
+        listFirehose(0),
         listMemories()
       ]);
     } catch (refreshError: unknown) {

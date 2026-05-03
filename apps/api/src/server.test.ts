@@ -118,6 +118,53 @@ describe("api", () => {
     expect(titles).not.toEqual(expect.arrayContaining(["Other project event", "Other proxy event"]));
   });
 
+  it("returns all project events when firehose limit is zero", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Complete history"
+    });
+    const otherSession = store.createSession({
+      projectId: "other-project",
+      title: "Other complete history"
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: `Project event ${index}`,
+        body: "Visible in complete dashboard event history"
+      });
+    }
+    store.createEvent({
+      sessionId: otherSession.id,
+      category: "codex_event",
+      title: "Other project event",
+      body: "Hidden from this dashboard"
+    });
+
+    const limited = await app.inject({ method: "GET", url: "/api/firehose/events?limit=2" });
+    const complete = await app.inject({ method: "GET", url: "/api/firehose/events?limit=0" });
+
+    expect(limited.statusCode).toBe(200);
+    expect(limited.json()).toHaveLength(2);
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json().map((event: { title: string }) => event.title)).toEqual(
+      expect.arrayContaining(["Project event 0", "Project event 1", "Project event 2"])
+    );
+    expect(complete.json().map((event: { title: string }) => event.title)).not.toContain(
+      "Other project event"
+    );
+  });
+
   it("lists only sessions for the current project", async () => {
     const store = createStore(":memory:");
     const app = await createApp({

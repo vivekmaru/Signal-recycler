@@ -2,7 +2,7 @@
 
 ## P1: Stream Or Poll Complete Session Detail Events
 
-Residual risk: Session Detail refetches complete events when the selected session changes, retry is clicked, or the capped dashboard firehose count changes. It is not a streaming detail subscription.
+Residual risk: Session Detail refetches complete events when the selected session changes, retry is clicked, or the dashboard event identity changes. It is not a streaming detail subscription.
 
 Next action: add a detail-route polling or server-sent event strategy that always uses `/api/sessions/:id/events` as the complete source of truth and backs off when the session is no longer active.
 
