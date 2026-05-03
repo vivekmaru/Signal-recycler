@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --exclude \"dist/**\"",
     "type-check": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

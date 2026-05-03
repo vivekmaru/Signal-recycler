@@ -192,4 +192,102 @@ describe("runCommand", () => {
     expect(output.some((line) => line.includes("Previous turn"))).toBe(false);
     expect(output.some((line) => line.includes("Current turn"))).toBe(true);
   });
+
+  it("writes only the final summary to stdout in JSON mode", async () => {
+    const output: string[] = [];
+    const client = {
+      getConfig: async () => ({
+        projectId: "demo",
+        workingDirectory: "/repo",
+        workingDirectoryBasename: "repo",
+        availableAdapters: ["default", "mock"]
+      }),
+      createSession: async () => ({ id: "session_1", projectId: "demo", title: "Session", createdAt: "now" }),
+      runSession: async () => ({ finalResponse: "done", candidateRules: [] }),
+      listEvents: async () => [event("event_1", "User prompt"), event("event_2", "Codex response")]
+    } satisfies ApiClient;
+
+    await runCommand(
+      {
+        command: "run",
+        prompt: "fix tests",
+        agent: "mock",
+        apiBaseUrl: "http://127.0.0.1:3001",
+        watch: true,
+        json: true
+      },
+      { client, write: (line) => output.push(line), sleep: async () => undefined }
+    );
+
+    expect(output).toHaveLength(1);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      sessionId: "session_1",
+      agent: "mock",
+      status: "completed",
+      finalResponse: "done"
+    });
+  });
+
+  it("does not dump timeline events when watch is disabled", async () => {
+    const output: string[] = [];
+    const client = {
+      getConfig: async () => ({
+        projectId: "demo",
+        workingDirectory: "/repo",
+        workingDirectoryBasename: "repo",
+        availableAdapters: ["default", "mock"]
+      }),
+      createSession: async () => ({ id: "session_1", projectId: "demo", title: "Session", createdAt: "now" }),
+      runSession: async () => ({ finalResponse: "done", candidateRules: [] }),
+      listEvents: async () => [event("event_1", "User prompt"), event("event_2", "Codex response")]
+    } satisfies ApiClient;
+
+    await runCommand(
+      {
+        command: "run",
+        prompt: "fix tests",
+        agent: "mock",
+        apiBaseUrl: "http://127.0.0.1:3001",
+        watch: false,
+        json: false
+      },
+      { client, write: (line) => output.push(line), sleep: async () => undefined }
+    );
+
+    expect(output.some((line) => line.includes("[agent]"))).toBe(false);
+    expect(output.join("\n")).toContain("Final response:");
+  });
+
+  it("does not replay previous events when continuing without watch", async () => {
+    const output: string[] = [];
+    const client = {
+      getConfig: async () => ({
+        projectId: "demo",
+        workingDirectory: "/repo",
+        workingDirectoryBasename: "repo",
+        availableAdapters: ["default", "mock"]
+      }),
+      createSession: async () => {
+        throw new Error("should not create");
+      },
+      runSession: async () => ({ finalResponse: "continued", candidateRules: [] }),
+      listEvents: async () => [event("event_old", "Previous turn"), event("event_new", "Current turn")]
+    } satisfies ApiClient;
+
+    await runCommand(
+      {
+        command: "run",
+        prompt: "continue",
+        agent: "mock",
+        apiBaseUrl: "http://127.0.0.1:3001",
+        sessionId: "session_existing",
+        watch: false,
+        json: false
+      },
+      { client, write: (line) => output.push(line), sleep: async () => undefined }
+    );
+
+    expect(output.some((line) => line.includes("Previous turn"))).toBe(false);
+    expect(output.some((line) => line.includes("Current turn"))).toBe(false);
+  });
 });

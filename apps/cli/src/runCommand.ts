@@ -23,17 +23,22 @@ export async function runCommand(
 
   const sessionId = command.sessionId ?? (await deps.client.createSession(command.title ?? command.prompt.slice(0, 80))).id;
   const continued = Boolean(command.sessionId);
-  deps.write(continued ? `Continuing Signal Recycler session ${sessionId}` : `Signal Recycler session ${sessionId}`);
-  deps.write(`Agent: ${command.agent}`);
+  const shouldWriteHumanOutput = !command.json;
+  const shouldStreamEvents = command.watch && shouldWriteHumanOutput;
+
+  if (shouldWriteHumanOutput) {
+    deps.write(continued ? `Continuing Signal Recycler session ${sessionId}` : `Signal Recycler session ${sessionId}`);
+    deps.write(`Agent: ${command.agent}`);
+  }
 
   const seenEventIds = new Set<string>();
-  if (continued && command.watch) {
+  if (continued) {
     await markExistingEvents(sessionId, deps.client.listEvents, seenEventIds);
   }
 
   const runPromise = deps.client.runSession(sessionId, command.prompt, command.agent);
 
-  if (command.watch) {
+  if (shouldStreamEvents) {
     await pollEventsUntilComplete({
       sessionId,
       seenEventIds,
@@ -46,10 +51,12 @@ export async function runCommand(
 
   const result = await runPromise;
   const events = await deps.client.listEvents(sessionId);
-  for (const event of events) {
-    if (!seenEventIds.has(event.id)) {
-      seenEventIds.add(event.id);
-      deps.write(formatEventLine(event));
+  if (shouldStreamEvents) {
+    for (const event of events) {
+      if (!seenEventIds.has(event.id)) {
+        seenEventIds.add(event.id);
+        deps.write(formatEventLine(event));
+      }
     }
   }
 

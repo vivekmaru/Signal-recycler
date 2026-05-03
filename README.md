@@ -238,14 +238,16 @@ SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev
 `sr run` is non-interactive, but it is not disposable. A new run creates a durable Signal Recycler session:
 
 ```bash
-sr run --agent codex "fix the failing tests"
+sr run --agent mock "fix the failing tests"
 ```
 
 Continue that same session by id:
 
 ```bash
-sr run --session session_abc123 "now add regression coverage"
+sr run --session session_abc123 --agent mock "now add regression coverage"
 ```
+
+Use `--agent codex` instead when the API is started with `SIGNAL_RECYCLER_CODEX_CLI=1` and your local Codex CLI is authenticated.
 
 The dashboard remains the audit surface for terminal-owned sessions. Use it to inspect the raw transcript, retrieved memory, injected context, skipped context, and learned memory candidates.
 

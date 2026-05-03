@@ -31,7 +31,10 @@ The implementation keeps `sr chat` as future terminal UX and does not implement 
   - Adds the `@signal-recycler/cli` workspace package.
   - Adds parser, API client, terminal formatter, run orchestration, binary entry point, and tests.
   - Calls the existing local API endpoints instead of importing API internals.
-  - Seeds existing event ids before watched continuation runs so terminal output does not replay previous turns.
+  - Keeps `--json` stdout machine-readable by suppressing human banners and event lines.
+  - Honors `--no-watch` by skipping terminal event streaming and final event dumps.
+  - Seeds existing event ids before continuation runs so terminal output does not replay previous turns.
+  - Excludes built `dist` files from CLI test discovery and excludes source test files from the CLI build output.
 - `package.json`
   - Adds root `cli` and `cli:build` convenience scripts.
 - `README.md`
@@ -50,6 +53,8 @@ The implementation keeps `sr chat` as future terminal UX and does not implement 
 - Confirm the CLI-as-thin-local-API-client approach is acceptable for the first pass.
 - Confirm the implementation keeps `processTurn(...)` as the single runtime path for memory retrieval, injection, adapter execution, and post-run learning.
 - Confirm watched continuation does not replay prior session events in terminal output.
+- Confirm `--json` writes only the final JSON summary to stdout.
+- Confirm `--no-watch` avoids timeline event output while still returning the final summary.
 - Confirm the README avoids overclaiming support for wrapping opaque vendor TUIs.
 
 ## Known Non-Blockers
@@ -75,7 +80,12 @@ The implementation keeps `sr chat` as future terminal UX and does not implement 
 - `pnpm --filter @signal-recycler/cli test` passed.
 - `pnpm --filter @signal-recycler/cli type-check` passed.
 - `pnpm --filter @signal-recycler/cli build` passed.
-- `pnpm test` passed: CLI 42 tests, web 18 tests, API 145 tests, shared package no-test pass.
+- PR review follow-up: `pnpm --filter @signal-recycler/cli test -- src/runCommand.test.ts` passed with regression coverage for JSON-only stdout, `--no-watch` event suppression, and non-watched continuation no-replay.
+- PR review follow-up: `pnpm --filter @signal-recycler/cli test` passed with 24 CLI source tests.
+- PR review follow-up: `pnpm --filter @signal-recycler/cli type-check` passed.
+- PR review follow-up: `pnpm --filter @signal-recycler/cli build` passed.
+- PR review follow-up: `git diff --check` passed.
+- `pnpm test` passed: CLI 24 tests, web 18 tests, API 145 tests, shared package no-test pass.
 - `pnpm type-check` passed.
 - `pnpm build` passed.
 - `git diff --check` passed.
