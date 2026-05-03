@@ -23,6 +23,10 @@ The design keeps `sr chat` as future terminal UX and rejects `sr codex` as the f
   - Defines durable session continuation through `sr run --session <id>`.
   - Documents why the CLI should call the existing local API rather than duplicating `processTurn`.
   - Defines the package shape, command contract, terminal output, dashboard relationship, error handling, test strategy, and future `sr chat` boundary.
+- `docs/superpowers/plans/2026-05-03-phase-4-5-terminal-owned-session-launch.md`
+  - Adds the task-by-task TDD implementation plan for the CLI package.
+  - Scopes the first runtime implementation to `sr run`, `--agent`, `--api`, `--session`, `--title`, `--json`, and `--no-watch`.
+  - Keeps `sr chat`, `sr codex`, `sr sessions`, and `sr run --last` out of the first implementation.
 - `docs/pr-notes/phase-4-5-terminal-owned-session-launch-review-guide.md`
   - Documents reviewer focus and verification for this planning branch.
 - `docs/pr-notes/phase-4-5-terminal-owned-session-launch-follow-up-backlog.md`
@@ -54,6 +58,7 @@ The design keeps `sr chat` as future terminal UX and rejects `sr codex` as the f
 - Checked for unsupported claims around Phase 5 source indexing, vector retrieval, cloud sync, compare/replay, and vendor TUI wrapping.
 - Checked the current codebase has reusable owned-session API surfaces: `POST /api/sessions`, `POST /api/sessions/:id/run`, `GET /api/sessions/:id/events`, adapter registry, and `processTurn(...)`.
 - Checked the existing run route already supports appending another turn to an existing session id.
+- Checked the implementation plan for scope coverage, placeholder language, and command/test specificity.
 
 ## Out Of Scope
 

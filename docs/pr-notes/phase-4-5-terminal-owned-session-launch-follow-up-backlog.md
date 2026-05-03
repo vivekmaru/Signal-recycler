@@ -2,9 +2,9 @@
 
 ## P0: Convert Design Into Implementation Plan
 
-Residual risk: this branch only records the terminal-owned session launch design.
+Status: complete in `docs/superpowers/plans/2026-05-03-phase-4-5-terminal-owned-session-launch.md`.
 
-Next action: after design review, write `docs/superpowers/plans/2026-05-03-phase-4-5-terminal-owned-session-launch.md` with task-by-task TDD implementation steps.
+Next action: choose Subagent-Driven or Inline Execution for implementation.
 
 ## P1: Decide Install And Invocation Polish
 
