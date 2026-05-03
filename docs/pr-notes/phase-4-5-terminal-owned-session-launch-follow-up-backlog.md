@@ -18,6 +18,12 @@ Residual risk: the first CLI can print the dashboard base URL, but the current w
 
 Next action: add route/deep-link support for opening Session Detail by session id, then update `sr run` output to print the exact session URL.
 
+## P1: Add `sr run --last` And `sr sessions`
+
+Residual risk: `sr run --session <id>` gives explicit durable continuation, but long coding sessions still require the user to keep or copy the session id.
+
+Next action: after explicit `--session` continuation works, add `sr sessions` to list recent durable sessions and `sr run --last "prompt"` to continue the most recent session for the active project/worktree.
+
 ## P1: Design `sr chat`
 
 Residual risk: `sr chat` is the path toward a full Signal Recycler TUI, but this design intentionally defers it.
