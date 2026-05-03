@@ -5,16 +5,19 @@ export function compactId(id: string): string {
 }
 
 export function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function formatDuration(start: string, end?: string): string {
   const startMs = new Date(start).getTime();
   const endMs = end ? new Date(end).getTime() : Date.now();
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return "0s";
   const seconds = Math.max(0, Math.round((endMs - startMs) / 1000));
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;

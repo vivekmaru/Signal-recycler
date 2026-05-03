@@ -2,13 +2,20 @@ import type { MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycle
 import type { SessionStatus, SessionSummary } from "../types";
 import { formatDuration } from "./format";
 
-export function summarizeSession(session: SessionRecord, events: TimelineEvent[]): SessionSummary {
+export function summarizeSession(
+  session: SessionRecord,
+  events: TimelineEvent[],
+  memories: MemoryRecord[] = []
+): SessionSummary {
   const sessionEvents = events
     .filter((event) => event.sessionId === session.id)
     .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
   const hasError = sessionEvents.some((event) => event.metadata["phase"] === "codex_error" || /failed/i.test(event.title));
-  const hasPendingMemory = sessionEvents.some((event) => event.category === "rule_candidate");
-  const hasRunning = sessionEvents.some((event) => /running/i.test(event.title));
+  const hasPendingMemory = memories.some(
+    (memory) => memory.status === "pending" && memoryBelongsToSession(memory, session.id, sessionEvents)
+  );
+  const latestEvent = sessionEvents.at(-1);
+  const hasRunning = latestEvent?.category === "codex_event" && latestEvent.metadata["phase"] === "input";
   const status: SessionStatus = hasError
     ? "failed"
     : hasPendingMemory
@@ -44,8 +51,8 @@ export function buildDashboardMetrics(input: {
   memories: MemoryRecord[];
 }) {
   return {
-    activeSessions: input.sessions.filter((session) =>
-      input.events.some((event) => event.sessionId === session.id && /running/i.test(event.title))
+    activeSessions: input.sessions.filter(
+      (session) => summarizeSession(session, input.events, input.memories).status === "running"
     ).length,
     approvedMemory: input.memories.filter((memory) => memory.status === "approved" && !memory.supersededBy).length,
     pendingMemory: input.memories.filter((memory) => memory.status === "pending").length,
@@ -53,6 +60,11 @@ export function buildDashboardMetrics(input: {
       ["memory_retrieval", "memory_injection", "compression_result"].includes(event.category)
     ).length
   };
+}
+
+function memoryBelongsToSession(memory: MemoryRecord, sessionId: string, sessionEvents: TimelineEvent[]): boolean {
+  if (memory.source.kind === "event" && memory.source.sessionId === sessionId) return true;
+  return Boolean(memory.sourceEventId && sessionEvents.some((event) => event.id === memory.sourceEventId));
 }
 
 export function deriveTokenDelta(events: TimelineEvent[]): number {

@@ -54,7 +54,7 @@ export function SessionDetailView({
     }
   }, [events, selectedEventId]);
 
-  const summary = useMemo(() => (session ? summarizeSession(session, events) : null), [events, session]);
+  const summary = useMemo(() => (session ? summarizeSession(session, events, memories) : null), [events, memories, session]);
   const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
   const selectedMemory = memories.find((memory) => memory.id === selectedMemoryId) ?? null;
   const retrievalEvents = events.filter((event) => event.category === "memory_retrieval");

@@ -50,6 +50,7 @@ export function useDashboardData() {
       try {
         await refresh();
         if (cancelled) return;
+        setError(null);
         setLoading(false);
       } catch (refreshError: unknown) {
         if (!cancelled) {

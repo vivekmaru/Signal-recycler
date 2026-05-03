@@ -136,7 +136,9 @@ function MemoryInspector({ selection }: { selection: Extract<InspectorSelection,
           <dt className="text-stone-500">Confidence</dt>
           <dd className="text-stone-800">{selection.memory.confidence}</dd>
           <dt className="text-stone-500">Last used</dt>
-          <dd className="font-mono text-stone-800">{selection.memory.lastUsedAt ?? "never"}</dd>
+          <dd className="font-mono text-stone-800">
+            {selection.memory.lastUsedAt ? formatDateTime(selection.memory.lastUsedAt) : "never"}
+          </dd>
         </dl>
       </section>
       <section className="rounded-md border border-dashed border-stone-300 bg-stone-50 p-4 text-stone-500">

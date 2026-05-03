@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { SessionRecord, TimelineEvent } from "@signal-recycler/shared";
+import type { MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { formatDateTime, formatTokenDelta } from "../lib/format";
 import { summarizeSession } from "../lib/sessionPresenters";
@@ -11,10 +11,12 @@ type SessionFilter = (typeof filters)[number];
 export function SessionsView({
   sessions,
   eventsBySession,
+  memories,
   onOpenSession
 }: {
   sessions: SessionRecord[];
   eventsBySession: Map<string, TimelineEvent[]>;
+  memories: MemoryRecord[];
   onOpenSession: (sessionId: string) => void;
 }) {
   const [filter, setFilter] = useState<SessionFilter>("all");
@@ -24,8 +26,8 @@ export function SessionsView({
     () =>
       [...sessions]
         .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-        .map((session) => summarizeSession(session, eventsBySession.get(session.id) ?? [])),
-    [eventsBySession, sessions]
+        .map((session) => summarizeSession(session, eventsBySession.get(session.id) ?? [], memories)),
+    [eventsBySession, memories, sessions]
   );
   const statusCounts = useMemo(() => countStatuses(summaries), [summaries]);
   const normalizedSearch = search.trim().toLowerCase();

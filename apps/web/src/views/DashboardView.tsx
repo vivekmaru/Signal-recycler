@@ -28,7 +28,7 @@ export function DashboardView({
   const recentSessions = [...sessions]
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, 5)
-    .map((session) => summarizeSession(session, eventsBySession.get(session.id) ?? []));
+    .map((session) => summarizeSession(session, eventsBySession.get(session.id) ?? [], memories));
   const pendingMemories = memories
     .filter((memory) => memory.status === "pending")
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))

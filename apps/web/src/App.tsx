@@ -154,6 +154,7 @@ export function App() {
             {route === "sessions" ? (
               <SessionsView
                 eventsBySession={data.eventsBySession}
+                memories={data.memories}
                 onOpenSession={(sessionId) => {
                   setSelectedSessionId(sessionId);
                   setRoute("session");
@@ -321,7 +322,7 @@ function NewSessionModal({
           ))}
         </select>
         <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={onCancel}>
+          <Button onClick={onCancel} type="button">
             Cancel
           </Button>
           <Button disabled={running} type="submit" variant="primary">

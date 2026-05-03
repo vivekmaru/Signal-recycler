@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SessionRecord, TimelineEvent } from "@signal-recycler/shared";
-import { deriveTokenDelta, summarizeSession } from "./sessionPresenters";
+import type { MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
+import { buildDashboardMetrics, deriveTokenDelta, summarizeSession } from "./sessionPresenters";
 
 const session: SessionRecord = {
   id: "session_1",
@@ -20,17 +20,42 @@ function event(input: Partial<TimelineEvent> & Pick<TimelineEvent, "id" | "categ
   };
 }
 
+function memory(input: Partial<MemoryRecord> & Pick<MemoryRecord, "id" | "status">): MemoryRecord {
+  return {
+    projectId: session.projectId,
+    category: "tooling",
+    rule: "Use pnpm.",
+    reason: "Learned from this session.",
+    sourceEventId: "e3",
+    createdAt: "2026-05-03T00:00:00.000Z",
+    approvedAt: null,
+    memoryType: "rule",
+    scope: { type: "project", value: null },
+    source: { kind: "event", sessionId: session.id, eventId: "e3" },
+    confidence: "medium",
+    lastUsedAt: null,
+    supersededBy: null,
+    syncStatus: "local",
+    updatedAt: "2026-05-03T00:00:00.000Z",
+    ...input
+  };
+}
+
 describe("session presenters", () => {
   it("derives session status and memory counts from events", () => {
-    const summary = summarizeSession(session, [
-      event({ id: "e1", category: "codex_event", title: "User prompt", body: "Test" }),
-      event({
-        id: "e2",
-        category: "memory_injection",
-        metadata: { memoryIds: ["mem_1", "mem_2"], adapter: "codex_cli" }
-      }),
-      event({ id: "e3", category: "rule_candidate", title: "Rule candidate", body: "Use pnpm." })
-    ]);
+    const summary = summarizeSession(
+      session,
+      [
+        event({ id: "e1", category: "codex_event", title: "User prompt", body: "Test" }),
+        event({
+          id: "e2",
+          category: "memory_injection",
+          metadata: { memoryIds: ["mem_1", "mem_2"], adapter: "codex_cli" }
+        }),
+        event({ id: "e3", category: "rule_candidate", title: "Rule candidate", body: "Use pnpm." })
+      ],
+      [memory({ id: "mem_3", status: "pending" })]
+    );
 
     expect(summary).toMatchObject({
       title: "Run validation",
@@ -40,6 +65,29 @@ describe("session presenters", () => {
       newMemory: 1,
       eventCount: 3
     });
+  });
+
+  it("does not keep an auto-approved candidate session in needs_review", () => {
+    const summary = summarizeSession(
+      session,
+      [
+        event({ id: "e1", category: "codex_event", title: "User prompt", body: "Test" }),
+        event({ id: "e2", category: "codex_event", title: "Codex response", body: "Done." }),
+        event({ id: "e3", category: "rule_candidate", title: "Rule candidate", body: "Use pnpm." }),
+        event({ id: "e4", category: "rule_auto_approved", title: "Rule auto-approved", body: "Use pnpm." })
+      ],
+      [memory({ id: "mem_3", status: "approved", approvedAt: "2026-05-03T00:00:01.000Z" })]
+    );
+
+    expect(summary.status).toBe("done");
+  });
+
+  it("marks a session as running while the latest lifecycle event is only the input prompt", () => {
+    const summary = summarizeSession(session, [
+      event({ id: "e1", category: "codex_event", title: "User prompt", metadata: { phase: "input" } })
+    ]);
+
+    expect(summary.status).toBe("running");
   });
 
   it("derives token savings from compression events", () => {
@@ -92,5 +140,15 @@ describe("session presenters", () => {
         event({ id: "e4", category: "compression_result", metadata: { tokensRemoved: 300 } })
       ])
     ).toBe(-300);
+  });
+
+  it("counts active sessions from lifecycle summaries", () => {
+    expect(
+      buildDashboardMetrics({
+        sessions: [session],
+        events: [event({ id: "e1", category: "codex_event", title: "User prompt", metadata: { phase: "input" } })],
+        memories: []
+      }).activeSessions
+    ).toBe(1);
   });
 });
