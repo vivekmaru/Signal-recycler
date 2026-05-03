@@ -225,7 +225,7 @@ export function createStore(path: string) {
         approvedAt: null,
         memoryType: input.memoryType ?? "rule",
         scope: input.scope ?? { type: "project", value: null },
-        source: input.source ?? defaultMemorySource(input.sourceEventId ?? null),
+        source: input.source ?? defaultMemorySource(db, input.sourceEventId ?? null),
         confidence: input.confidence ?? "medium",
         lastUsedAt: null,
         supersededBy: null,
@@ -825,9 +825,12 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function defaultMemorySource(sourceEventId: string | null): MemorySource {
+function defaultMemorySource(db: DatabaseSync, sourceEventId: string | null): MemorySource {
   if (sourceEventId) {
-    return { kind: "event", sessionId: "unknown", eventId: sourceEventId };
+    const row = db
+      .prepare("SELECT session_id FROM events WHERE id = ?")
+      .get(sourceEventId) as { session_id?: string } | undefined;
+    return { kind: "event", sessionId: String(row?.session_id ?? "unknown"), eventId: sourceEventId };
   }
   return { kind: "manual", author: "local-user" };
 }

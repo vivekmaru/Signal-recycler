@@ -84,6 +84,33 @@ describe("store", () => {
     expect(candidate.updatedAt).toBe(candidate.createdAt);
   });
 
+  it("records source event session id for event-derived memory defaults", () => {
+    const store = createStore(":memory:");
+    const session = store.createSession({ projectId: "demo", title: "Demo session" });
+    const event = store.createEvent({
+      sessionId: session.id,
+      category: "codex_event",
+      title: "Codex response",
+      body: "Use pnpm.",
+      metadata: {}
+    });
+
+    const candidate = store.createRuleCandidate({
+      projectId: "demo",
+      category: "tooling",
+      rule: "Use pnpm for package operations.",
+      reason: "The agent observed a package-manager correction.",
+      sourceEventId: event.id
+    });
+
+    expect(candidate.source).toEqual({ kind: "event", sessionId: session.id, eventId: event.id });
+    expect(store.getRule(candidate.id)?.source).toEqual({
+      kind: "event",
+      sessionId: session.id,
+      eventId: event.id
+    });
+  });
+
   it("updates rule updatedAt when approving and rejecting", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));

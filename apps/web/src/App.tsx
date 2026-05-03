@@ -87,9 +87,11 @@ export function App() {
     data.sessions[0] ??
     null;
   const selectedSessionIdForDetail = route === "session" ? (selectedSession?.id ?? null) : null;
-  const selectedSessionFirehoseEventCount = selectedSessionIdForDetail
-    ? (data.eventsBySession.get(selectedSessionIdForDetail)?.length ?? 0)
-    : 0;
+  const selectedSessionFirehoseEventIdentity = selectedSessionIdForDetail
+    ? (data.eventsBySession.get(selectedSessionIdForDetail) ?? [])
+        .map((event) => `${event.id}:${event.createdAt}`)
+        .join("|")
+    : "";
 
   useEffect(() => {
     if (!selectedSessionIdForDetail) {
@@ -118,7 +120,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionFirehoseEventCount, selectedSessionIdForDetail, sessionDetailReloadKey]);
+  }, [selectedSessionFirehoseEventIdentity, selectedSessionIdForDetail, sessionDetailReloadKey]);
 
   return (
     <AppShell
