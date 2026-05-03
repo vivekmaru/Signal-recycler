@@ -1,20 +1,20 @@
 # Phase 4.5 Terminal-Owned Session Launch Follow-Up Backlog
 
-## P0: Convert Design Into Implementation Plan
+## P0: Implement Terminal-Owned Session Launch
 
-Status: complete in `docs/superpowers/plans/2026-05-03-phase-4-5-terminal-owned-session-launch.md`.
+Status: complete in `apps/cli`.
 
-Next action: choose Subagent-Driven or Inline Execution for implementation.
+Next action: review the PR and verify `sr run` against a local mock API.
 
 ## P1: Decide Install And Invocation Polish
 
-Residual risk: the design uses a real `sr` package binary shape but does not decide global install, `pnpm dlx`, local workspace script, or release packaging details.
+Residual risk: the implementation uses a real `sr` package binary shape but does not decide global install, `pnpm dlx`, local workspace script, or release packaging details.
 
 Next action: after the local binary works in the workspace, decide whether the first documented install path is npm global install, `pnpm --filter @signal-recycler/cli`, or a root helper script.
 
 ## P1: Add Dashboard Deep Links
 
-Residual risk: the first CLI can print the dashboard base URL, but the current web route state may not support direct links to a specific session.
+Residual risk: the CLI prints the dashboard base URL, but the current web route state may not support direct links to a specific session.
 
 Next action: add route/deep-link support for opening Session Detail by session id, then update `sr run` output to print the exact session URL.
 
@@ -23,6 +23,12 @@ Next action: add route/deep-link support for opening Session Detail by session i
 Residual risk: `sr run --session <id>` gives explicit durable continuation, but long coding sessions still require the user to keep or copy the session id.
 
 Next action: after explicit `--session` continuation works, add `sr sessions` to list recent durable sessions and `sr run --last "prompt"` to continue the most recent session for the active project/worktree.
+
+## P1: Reduce Continuation Verbosity Without Hiding Auditability
+
+Residual risk: `sr run --session <id>` no longer replays previous terminal events, but it still prints all new event categories in a simple flat stream. Longer sessions may need better grouping or compact defaults.
+
+Next action: after reviewers test the CLI, decide whether terminal output should group by turn, collapse classifier events by default, or add a `--verbose` mode.
 
 ## P1: Design `sr chat`
 

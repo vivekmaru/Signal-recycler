@@ -27,6 +27,10 @@ export async function runCommand(
   deps.write(`Agent: ${command.agent}`);
 
   const seenEventIds = new Set<string>();
+  if (continued && command.watch) {
+    await markExistingEvents(sessionId, deps.client.listEvents, seenEventIds);
+  }
+
   const runPromise = deps.client.runSession(sessionId, command.prompt, command.agent);
 
   if (command.watch) {
@@ -60,6 +64,17 @@ export async function runCommand(
 
   deps.write(command.json ? formatJsonSummary(summary) : formatSummary(summary));
   return summary;
+}
+
+async function markExistingEvents(
+  sessionId: string,
+  listEvents: ApiClient["listEvents"],
+  seenEventIds: Set<string>
+): Promise<void> {
+  const events = await listEvents(sessionId);
+  for (const event of events) {
+    seenEventIds.add(event.id);
+  }
 }
 
 async function pollEventsUntilComplete(input: {

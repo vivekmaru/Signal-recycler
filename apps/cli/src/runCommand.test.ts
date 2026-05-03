@@ -154,4 +154,42 @@ describe("runCommand", () => {
     expect(output.filter((line) => line.includes("User prompt"))).toHaveLength(1);
     expect(output.filter((line) => line.includes("Codex response"))).toHaveLength(1);
   });
+
+  it("does not replay previous events when continuing a watched session", async () => {
+    const output: string[] = [];
+    let eventCalls = 0;
+    const client = {
+      getConfig: async () => ({
+        projectId: "demo",
+        workingDirectory: "/repo",
+        workingDirectoryBasename: "repo",
+        availableAdapters: ["default", "mock"]
+      }),
+      createSession: async () => {
+        throw new Error("should not create");
+      },
+      runSession: async () => ({ finalResponse: "continued", candidateRules: [] }),
+      listEvents: async () => {
+        eventCalls += 1;
+        const previous = event("event_old", "Previous turn");
+        return eventCalls === 1 ? [previous] : [previous, event("event_new", "Current turn")];
+      }
+    } satisfies ApiClient;
+
+    await runCommand(
+      {
+        command: "run",
+        prompt: "continue",
+        agent: "mock",
+        apiBaseUrl: "http://127.0.0.1:3001",
+        sessionId: "session_existing",
+        watch: true,
+        json: false
+      },
+      { client, write: (line) => output.push(line), sleep: async () => undefined }
+    );
+
+    expect(output.some((line) => line.includes("Previous turn"))).toBe(false);
+    expect(output.some((line) => line.includes("Current turn"))).toBe(true);
+  });
 });
