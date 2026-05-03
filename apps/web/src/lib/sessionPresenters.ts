@@ -14,8 +14,9 @@ export function summarizeSession(
   const hasPendingMemory = memories.some(
     (memory) => memory.status === "pending" && memoryBelongsToSession(memory, session.id, sessionEvents)
   );
-  const latestEvent = sessionEvents.at(-1);
-  const hasRunning = latestEvent?.category === "codex_event" && latestEvent.metadata["phase"] === "input";
+  const hasInput = sessionEvents.some((event) => event.category === "codex_event" && event.metadata["phase"] === "input");
+  const hasTerminal = sessionEvents.some(isTerminalSessionEvent);
+  const hasRunning = hasInput && !hasTerminal;
   const status: SessionStatus = hasError
     ? "failed"
     : hasPendingMemory
@@ -65,6 +66,11 @@ export function buildDashboardMetrics(input: {
 function memoryBelongsToSession(memory: MemoryRecord, sessionId: string, sessionEvents: TimelineEvent[]): boolean {
   if (memory.source.kind === "event" && memory.source.sessionId === sessionId) return true;
   return Boolean(memory.sourceEventId && sessionEvents.some((event) => event.id === memory.sourceEventId));
+}
+
+function isTerminalSessionEvent(event: TimelineEvent): boolean {
+  if (event.metadata["phase"] === "codex_error") return true;
+  return event.category === "codex_event" && /codex response/i.test(event.title);
 }
 
 export function deriveTokenDelta(events: TimelineEvent[]): number {

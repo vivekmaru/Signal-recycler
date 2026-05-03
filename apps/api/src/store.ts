@@ -202,7 +202,7 @@ export function createStore(path: string) {
         LEFT JOIN sessions ON sessions.id = events.session_id
         WHERE sessions.project_id = ?
            OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = ?)
-        ORDER BY events.created_at DESC`;
+        ORDER BY events.created_at DESC, events.rowid DESC`;
       if (limit === 0) {
         return db.prepare(query).all(projectId, projectId).map(mapEvent);
       }
@@ -702,14 +702,30 @@ function backfillEventMemorySources(db: DatabaseSync): void {
     `UPDATE rules
      SET source = json_object(
        'kind', 'event',
-       'sessionId', COALESCE(
-         (SELECT events.session_id FROM events WHERE events.id = rules.source_event_id),
-         'unknown'
+       'sessionId', (
+         SELECT events.session_id
+         FROM events
+         LEFT JOIN sessions ON sessions.id = events.session_id
+         WHERE events.id = rules.source_event_id
+           AND (
+             sessions.project_id = rules.project_id
+             OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = rules.project_id)
+           )
        ),
        'eventId', source_event_id
      )
      WHERE source_event_id IS NOT NULL
-       AND source = '{"kind":"manual","author":"local-user"}'`
+       AND source = '{"kind":"manual","author":"local-user"}'
+       AND EXISTS (
+         SELECT 1
+         FROM events
+         LEFT JOIN sessions ON sessions.id = events.session_id
+         WHERE events.id = rules.source_event_id
+           AND (
+             sessions.project_id = rules.project_id
+             OR (sessions.id IS NULL AND json_extract(events.metadata, '$.projectId') = rules.project_id)
+           )
+       )`
   ).run();
 }
 

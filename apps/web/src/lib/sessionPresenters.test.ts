@@ -90,6 +90,27 @@ describe("session presenters", () => {
     expect(summary.status).toBe("running");
   });
 
+  it("keeps a session running while context events follow the input before terminal response", () => {
+    const summary = summarizeSession(session, [
+      event({ id: "e1", category: "codex_event", title: "User prompt", metadata: { phase: "input" } }),
+      event({ id: "e2", category: "memory_retrieval", title: "Retrieved memory" }),
+      event({ id: "e3", category: "memory_injection", title: "Injected memory", metadata: { memoryIds: ["mem_1"] } })
+    ]);
+
+    expect(summary.status).toBe("running");
+  });
+
+  it("marks a session done after terminal response even when post-run events follow", () => {
+    const summary = summarizeSession(session, [
+      event({ id: "e1", category: "codex_event", title: "User prompt", metadata: { phase: "input" } }),
+      event({ id: "e2", category: "memory_injection", title: "Injected memory", metadata: { memoryIds: ["mem_1"] } }),
+      event({ id: "e3", category: "codex_event", title: "Codex response", body: "Done." }),
+      event({ id: "e4", category: "classifier_result", title: "Mark and distill complete" })
+    ]);
+
+    expect(summary.status).toBe("done");
+  });
+
   it("derives token savings from compression events", () => {
     expect(
       deriveTokenDelta([

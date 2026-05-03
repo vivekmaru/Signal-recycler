@@ -6,6 +6,12 @@ Residual risk: Session Detail refetches complete events when the selected sessio
 
 Next action: add a detail-route polling or server-sent event strategy that always uses `/api/sessions/:id/events` as the complete source of truth and backs off when the session is no longer active.
 
+## P1: Add Incremental Overview Event Summaries
+
+Residual risk: Dashboard and Sessions overview polling intentionally uses a bounded project firehose to keep refresh cost stable. Older sessions can therefore have less precise derived summaries in the overview than in Session Detail.
+
+Next action: add a local summary endpoint or cursor-based event delta API that returns stable per-session lifecycle, memory, and token aggregates without polling all historical events every 1.5 seconds.
+
 ## P1: Terminal-Owned Session Launch
 
 Residual risk: Phase 4.5 now has dashboard-owned session launch, but it does not yet provide a terminal-first owned-session launch flow that can be used naturally from a developer shell.

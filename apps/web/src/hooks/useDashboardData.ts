@@ -3,6 +3,7 @@ import type { MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycle
 import { fetchConfig, listFirehose, listMemories, listSessions, type ApiConfig } from "../api";
 
 const POLL_INTERVAL_MS = 1500;
+const FIREHOSE_POLL_LIMIT = 250;
 
 export function useDashboardData() {
   const [config, setConfig] = useState<ApiConfig | null>(null);
@@ -21,7 +22,7 @@ export function useDashboardData() {
     const [configResult, sessionsResult, eventsResult, memoriesResult] = await Promise.allSettled([
       fetchConfig(),
       listSessions(),
-      listFirehose(0),
+      listFirehose(FIREHOSE_POLL_LIMIT),
       listMemories()
     ] as const);
     if (!mountedRef.current || refreshId !== latestRefreshIdRef.current) return;
@@ -81,7 +82,12 @@ export function useDashboardData() {
   const eventsBySession = useMemo(() => {
     const grouped = new Map<string, TimelineEvent[]>();
     for (const event of events) {
-      grouped.set(event.sessionId, [...(grouped.get(event.sessionId) ?? []), event]);
+      const bucket = grouped.get(event.sessionId);
+      if (bucket) {
+        bucket.push(event);
+      } else {
+        grouped.set(event.sessionId, [event]);
+      }
     }
     return grouped;
   }, [events]);

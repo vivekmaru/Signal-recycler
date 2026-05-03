@@ -17,6 +17,7 @@ const TEST_APP_OPTIONS = {
 } as const;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -192,6 +193,41 @@ describe("api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toHaveLength(1);
+  });
+
+  it("orders same-timestamp project firehose events by newest inserted first", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-03T00:00:00.000Z"));
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Stable order"
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: `Project event ${index}`,
+        body: "Visible in stable dashboard event history"
+      });
+    }
+
+    const response = await app.inject({ method: "GET", url: "/api/firehose/events?limit=3" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().map((event: { title: string }) => event.title)).toEqual([
+      "Project event 2",
+      "Project event 1",
+      "Project event 0"
+    ]);
   });
 
   it("lists only sessions for the current project", async () => {

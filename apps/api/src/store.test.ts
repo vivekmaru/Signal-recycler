@@ -84,6 +84,124 @@ describe("store", () => {
     expect(candidate.updatedAt).toBe(candidate.createdAt);
   });
 
+  it("backfills event memory sources only when the source event belongs to the rule project", () => {
+    const databasePath = join(mkdtempSync(join(tmpdir(), "signal-recycler-store-")), "test.sqlite");
+    const db = new DatabaseSync(databasePath);
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        metadata TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        category TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
+
+      CREATE TABLE schema_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    db.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1')").run();
+    db.prepare("INSERT INTO sessions (id, project_id, title, created_at) VALUES (?, ?, ?, ?)").run(
+      "session_demo",
+      "demo",
+      "Demo",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare("INSERT INTO sessions (id, project_id, title, created_at) VALUES (?, ?, ?, ?)").run(
+      "session_other",
+      "other",
+      "Other",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO events (id, session_id, category, title, body, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "event_demo",
+      "session_demo",
+      "codex_event",
+      "Demo response",
+      "Use pnpm.",
+      "{}",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO events (id, session_id, category, title, body, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "event_other",
+      "session_other",
+      "codex_event",
+      "Other response",
+      "Use npm.",
+      "{}",
+      "2026-05-03T00:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "rule_demo",
+      "demo",
+      "pending",
+      "tooling",
+      "Use pnpm.",
+      "Same project source.",
+      "event_demo",
+      "2026-05-03T00:00:00.000Z",
+      null
+    );
+    db.prepare(
+      `INSERT INTO rules (
+        id, project_id, status, category, rule, reason, source_event_id, created_at, approved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "rule_foreign",
+      "demo",
+      "pending",
+      "tooling",
+      "Use pnpm.",
+      "Foreign project source.",
+      "event_other",
+      "2026-05-03T00:00:00.000Z",
+      null
+    );
+    db.close();
+
+    const store = createStore(databasePath);
+
+    expect(store.getRule("rule_demo")?.source).toEqual({
+      kind: "event",
+      sessionId: "session_demo",
+      eventId: "event_demo"
+    });
+    expect(store.getRule("rule_foreign")?.source).toEqual({
+      kind: "manual",
+      author: "local-user"
+    });
+  });
+
   it("records source event session id for event-derived memory defaults", () => {
     const store = createStore(":memory:");
     const session = store.createSession({ projectId: "demo", title: "Demo session" });
