@@ -220,6 +220,37 @@ Once enabled, run a session with an explicit adapter selection:
 
 This adapter shells out to the local `codex exec --json` command and uses your local Codex CLI authentication. The agent run does not require `OPENAI_API_KEY`, though the optional post-run classifier still uses `OPENAI_API_KEY` when configured.
 
+## Terminal-Owned Sessions
+
+Signal Recycler also exposes a local `sr` CLI package for terminal-owned sessions.
+
+```bash
+pnpm --filter @signal-recycler/cli build
+node apps/cli/dist/main.js run --agent mock "check learned constraints"
+```
+
+The CLI requires the local Signal Recycler API to be running:
+
+```bash
+SIGNAL_RECYCLER_MOCK_CODEX=1 pnpm dev
+```
+
+`sr run` is non-interactive, but it is not disposable. A new run creates a durable Signal Recycler session:
+
+```bash
+sr run --agent mock "fix the failing tests"
+```
+
+Continue that same session by id:
+
+```bash
+sr run --session session_abc123 --agent mock "now add regression coverage"
+```
+
+Use `--agent codex` instead when the API is started with `SIGNAL_RECYCLER_CODEX_CLI=1` and your local Codex CLI is authenticated.
+
+The dashboard remains the audit surface for terminal-owned sessions. Use it to inspect the raw transcript, retrieved memory, injected context, skipped context, and learned memory candidates.
+
 ## Dashboard
 
 The dashboard is the main product surface:

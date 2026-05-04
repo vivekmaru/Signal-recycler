@@ -46,6 +46,12 @@ importers:
         specifier: ^4.21.0
         version: 4.21.0
 
+  apps/cli:
+    devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+
   apps/web:
     dependencies:
       '@signal-recycler/shared':
