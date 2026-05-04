@@ -31,32 +31,28 @@ export function parseArgs(argv: string[]): Command {
     if (!token) continue;
 
     if (token === "--agent") {
-      const value = rest[index + 1];
-      if (!value) throw new Error("--agent requires a value");
+      const value = readOptionValue(token, rest[index + 1]);
       agent = parseAgent(value);
       index += 1;
       continue;
     }
 
     if (token === "--api") {
-      const value = rest[index + 1];
-      if (!value) throw new Error("--api requires a value");
+      const value = readOptionValue(token, rest[index + 1]);
       apiBaseUrl = parseApiBaseUrl(value);
       index += 1;
       continue;
     }
 
     if (token === "--session") {
-      const value = rest[index + 1];
-      if (!value) throw new Error("--session requires a value");
+      const value = readOptionValue(token, rest[index + 1]);
       sessionId = value;
       index += 1;
       continue;
     }
 
     if (token === "--title") {
-      const value = rest[index + 1];
-      if (!value) throw new Error("--title requires a value");
+      const value = readOptionValue(token, rest[index + 1]);
       title = value;
       index += 1;
       continue;
@@ -93,6 +89,11 @@ export function parseArgs(argv: string[]): Command {
     watch,
     json
   };
+}
+
+function readOptionValue(option: string, value: string | undefined): string {
+  if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
+  return value;
 }
 
 function parseAgent(value: string): Agent {

@@ -36,6 +36,12 @@ Residual risk: `sr chat` is the path toward a full Signal Recycler TUI, but this
 
 Next action: after `sr run` is implemented and tested, design a focused `sr chat --agent codex` phase that keeps Signal Recycler as the owner of conversation history and context assembly.
 
+## P2: Revisit CLI Parser Once Commands Expand
+
+Residual risk: the hand-rolled parser is covered for the current `sr run` flags, including option-token value guards, but more subcommands will make parser behavior easier to regress.
+
+Next action: when adding `sr sessions`, `sr chat`, or `sr run --last`, evaluate a small CLI parser library or shared parser test matrix before growing the current manual parser.
+
 ## P2: Embedded Runtime Fallback
 
 Residual risk: requiring a running local API server is acceptable for the first pass, but some developers will expect `sr run` to start or embed the runtime automatically.

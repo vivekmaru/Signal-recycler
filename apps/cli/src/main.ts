@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "./args.js";
 import { createApiClient } from "./apiClient.js";
 import { runCommand } from "./runCommand.js";
@@ -31,9 +32,21 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
+export function isDirectRunPath(
+  modulePath: string,
+  entrypointPath: string,
+  resolvePath: (path: string) => string = realpathSync
+): boolean {
+  try {
+    return resolvePath(modulePath) === resolvePath(entrypointPath);
+  } catch {
+    return modulePath === entrypointPath;
+  }
+}
+
 function isDirectRun(): boolean {
   const entrypoint = process.argv[1];
-  return Boolean(entrypoint && import.meta.url === pathToFileURL(entrypoint).href);
+  return Boolean(entrypoint && isDirectRunPath(fileURLToPath(import.meta.url), entrypoint));
 }
 
 if (isDirectRun()) {

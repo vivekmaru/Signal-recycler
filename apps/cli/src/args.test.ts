@@ -35,6 +35,13 @@ describe("parseArgs", () => {
     ).toThrow("--title can only be used when creating a new session");
   });
 
+  it.each(["--agent", "--api", "--session", "--title"])(
+    "rejects another option token as a missing %s value",
+    (option) => {
+      expect(() => parseArgs(["run", option, "--json", "fix it"])).toThrow(`${option} requires a value`);
+    }
+  );
+
   it("rejects empty prompt", () => {
     expect(() => parseArgs(["run"])).toThrow("Prompt is required");
   });
