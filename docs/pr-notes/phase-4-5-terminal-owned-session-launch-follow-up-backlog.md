@@ -36,6 +36,12 @@ Residual risk: `Events observed` now reports current-run events instead of total
 
 Next action: when adding `sr sessions` or session detail deep links, decide whether CLI summaries should expose separate current-run and session-total counts.
 
+## P2: Add Server-Side Event Cursor For Continuations
+
+Residual risk: continued JSON summaries now count current-run events without preloading historical events by filtering post-run events against the CLI run-start timestamp. That is acceptable for the local API path, but a server-side event cursor or turn id would be more precise.
+
+Next action: when owned-session APIs evolve, return a run event cursor or turn id from `POST /api/sessions/:id/run` so CLI summaries can count current-run events without timestamp filtering.
+
 ## P2: Revisit Watch Polling Controls
 
 Residual risk: watched runs no longer pay an extra sleep after fast completion, but the polling interval is still fixed at one second while longer runs are active.

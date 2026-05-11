@@ -40,6 +40,7 @@ export async function runCommand(
     }
   }
 
+  const runStartedAt = new Date();
   const runPromise = deps.client.runSession(sessionId, command.prompt, command.agent);
 
   if (shouldStreamEvents) {
@@ -54,7 +55,9 @@ export async function runCommand(
   }
 
   const result = await runPromise;
-  const events = shouldStreamEvents || !continued ? await deps.client.listEvents(sessionId) : [];
+  const shouldCountJsonContinuationEvents = command.json && continued;
+  const events =
+    shouldStreamEvents || !continued || shouldCountJsonContinuationEvents ? await deps.client.listEvents(sessionId) : [];
   if (shouldStreamEvents) {
     for (const event of events) {
       if (!seenEventIds.has(event.id)) {
@@ -63,7 +66,11 @@ export async function runCommand(
       }
     }
   }
-  const currentRunEvents = events.filter((event) => !baselineEventIds.has(event.id));
+  const currentRunEvents = events.filter((event) => {
+    if (baselineEventIds.size > 0) return !baselineEventIds.has(event.id);
+    if (!continued) return true;
+    return eventCreatedAtOrAfter(event, runStartedAt);
+  });
 
   const summary: RunSummary = {
     sessionId,
@@ -76,6 +83,12 @@ export async function runCommand(
 
   deps.write(command.json ? formatJsonSummary(summary) : formatSummary(summary));
   return summary;
+}
+
+function eventCreatedAtOrAfter(event: TimelineEvent, timestamp: Date): boolean {
+  const createdAt = Date.parse(event.createdAt);
+  if (Number.isNaN(createdAt)) return false;
+  return createdAt >= timestamp.getTime();
 }
 
 async function markExistingEvents(

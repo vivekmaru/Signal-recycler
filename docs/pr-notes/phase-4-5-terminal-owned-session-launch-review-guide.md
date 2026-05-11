@@ -91,11 +91,12 @@ The implementation keeps `sr chat` as future terminal UX and does not implement 
 - PR review follow-up: `pnpm --filter @signal-recycler/cli test -- src/args.test.ts src/main.test.ts` passed with regression coverage for symlinked package-bin launch detection and value-taking flags rejecting option tokens as missing values.
 - PR review follow-up: `pnpm --filter @signal-recycler/cli test -- src/runCommand.test.ts` passed with regression coverage for skipping historical event preloads when event streaming is disabled and counting only current-run events in continuation summaries.
 - PR review follow-up: `pnpm --filter @signal-recycler/cli test -- src/runCommand.test.ts` passed with regression coverage for fast watched runs returning without an extra polling sleep before the final summary.
-- PR review follow-up: `pnpm --filter @signal-recycler/cli test` passed with 29 CLI source tests.
+- PR review follow-up: `pnpm --filter @signal-recycler/cli test -- src/runCommand.test.ts` passed with regression coverage for continued JSON summaries reporting current-run event counts without pre-run historical event preload.
+- PR review follow-up: `pnpm --filter @signal-recycler/cli test` passed with 30 CLI source tests.
 - PR review follow-up: `pnpm --filter @signal-recycler/cli type-check` passed.
 - PR review follow-up: `pnpm --filter @signal-recycler/cli build` passed.
 - PR review follow-up: `git diff --check` passed.
-- `pnpm test` passed: CLI 29 tests, web 18 tests, API 145 tests, shared package no-test pass.
+- `pnpm test` passed: CLI 30 tests, web 18 tests, API 145 tests, shared package no-test pass.
 - `pnpm type-check` passed.
 - `pnpm build` passed.
 - `git diff --check` passed.

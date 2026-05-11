@@ -3,7 +3,7 @@ import { type ApiClient } from "./apiClient.js";
 import { runCommand } from "./runCommand.js";
 import { type TimelineEvent } from "./types.js";
 
-function event(id: string, title: string): TimelineEvent {
+function event(id: string, title: string, createdAt = "2026-05-03T00:00:00.000Z"): TimelineEvent {
   return {
     id,
     sessionId: "session_1",
@@ -11,7 +11,7 @@ function event(id: string, title: string): TimelineEvent {
     title,
     body: "",
     metadata: {},
-    createdAt: "2026-05-03T00:00:00.000Z"
+    createdAt
   };
 }
 
@@ -235,6 +235,47 @@ describe("runCommand", () => {
       status: "completed",
       finalResponse: "done"
     });
+  });
+
+  it("reports current-run events when continuing in JSON mode", async () => {
+    const output: string[] = [];
+    let eventCalls = 0;
+    const client = {
+      getConfig: async () => ({
+        projectId: "demo",
+        workingDirectory: "/repo",
+        workingDirectoryBasename: "repo",
+        availableAdapters: ["default", "mock"]
+      }),
+      createSession: async () => {
+        throw new Error("should not create");
+      },
+      runSession: async () => ({ finalResponse: "continued", candidateRules: [] }),
+      listEvents: async () => {
+        eventCalls += 1;
+        return [
+          event("event_old", "Previous turn", "2026-05-02T00:00:00.000Z"),
+          event("event_new", "Current turn", new Date(Date.now() + 1000).toISOString())
+        ];
+      }
+    } satisfies ApiClient;
+
+    const summary = await runCommand(
+      {
+        command: "run",
+        prompt: "continue",
+        agent: "mock",
+        apiBaseUrl: "http://127.0.0.1:3001",
+        sessionId: "session_existing",
+        watch: true,
+        json: true
+      },
+      { client, write: (line) => output.push(line), sleep: async () => undefined }
+    );
+
+    expect(eventCalls).toBe(1);
+    expect(summary.events).toBe(1);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({ events: 1, continued: true });
   });
 
   it("does not dump timeline events when watch is disabled", async () => {
