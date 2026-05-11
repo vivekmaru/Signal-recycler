@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type ApiClient } from "./apiClient.js";
-import { runCommand } from "./runCommand.js";
+import { buildSessionUrl, runCommand } from "./runCommand.js";
 import { type TimelineEvent } from "./types.js";
 
 function event(id: string, title: string, createdAt = "2026-05-03T00:00:00.000Z"): TimelineEvent {
@@ -233,8 +233,40 @@ describe("runCommand", () => {
       sessionId: "session_1",
       agent: "mock",
       status: "completed",
-      finalResponse: "done"
+      finalResponse: "done",
+      sessionUrl: "http://127.0.0.1:5173/sessions/session_1"
     });
+  });
+
+  it("prints the exact dashboard session URL in human summaries", async () => {
+    const output: string[] = [];
+    const client = {
+      getConfig: async () => ({
+        projectId: "demo",
+        workingDirectory: "/repo",
+        workingDirectoryBasename: "repo",
+        availableAdapters: ["default", "mock"],
+        dashboardUrl: "http://localhost:5173/"
+      }),
+      createSession: async () => ({ id: "session_1", projectId: "demo", title: "Session", createdAt: "now" }),
+      runSession: async () => ({ finalResponse: "done", candidateRules: [] }),
+      listEvents: async () => []
+    } satisfies ApiClient;
+
+    const summary = await runCommand(
+      {
+        command: "run",
+        prompt: "fix tests",
+        agent: "mock",
+        apiBaseUrl: "http://127.0.0.1:3001",
+        watch: false,
+        json: false
+      },
+      { client, write: (line) => output.push(line), sleep: async () => undefined }
+    );
+
+    expect(summary.sessionUrl).toBe("http://localhost:5173/sessions/session_1");
+    expect(output.join("\n")).toContain("Dashboard: http://localhost:5173/sessions/session_1");
   });
 
   it("reports current-run events when continuing in JSON mode", async () => {
@@ -345,5 +377,13 @@ describe("runCommand", () => {
     expect(output.some((line) => line.includes("Current turn"))).toBe(false);
     expect(eventCalls).toBe(0);
     expect(summary.events).toBe(0);
+  });
+});
+
+describe("buildSessionUrl", () => {
+  it("joins dashboard base URLs and encoded session ids", () => {
+    expect(buildSessionUrl("http://127.0.0.1:5173/", "session_1/with slash")).toBe(
+      "http://127.0.0.1:5173/sessions/session_1%2Fwith%20slash"
+    );
   });
 });

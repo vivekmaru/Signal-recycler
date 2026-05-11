@@ -218,7 +218,7 @@ Once enabled, run a session with an explicit adapter selection:
 { "prompt": "Run validation.", "adapter": "codex_cli" }
 ```
 
-This adapter shells out to the local `codex exec --json` command and uses your local Codex CLI authentication. The agent run does not require `OPENAI_API_KEY`, though the optional post-run classifier still uses `OPENAI_API_KEY` when configured.
+This adapter uses `@openai/codex-sdk` to run the local Codex CLI with structured streamed events and Codex thread resume. It uses your local Codex CLI authentication, so the agent run does not require `OPENAI_API_KEY`, though the optional post-run classifier still uses `OPENAI_API_KEY` when configured.
 
 ## Terminal-Owned Sessions
 
@@ -250,6 +250,7 @@ sr run --session session_abc123 --agent mock "now add regression coverage"
 Use `--agent codex` instead when the API is started with `SIGNAL_RECYCLER_CODEX_CLI=1` and your local Codex CLI is authenticated.
 
 The dashboard remains the audit surface for terminal-owned sessions. Use it to inspect the raw transcript, retrieved memory, injected context, skipped context, and learned memory candidates.
+`sr run` prints a session-specific dashboard URL so terminal-owned sessions can be opened directly in Session Detail.
 
 ## Dashboard
 

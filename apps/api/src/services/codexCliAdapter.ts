@@ -1,155 +1,208 @@
-import { spawn } from "node:child_process";
+import {
+  Codex,
+  type ThreadEvent,
+  type ThreadItem,
+  type ThreadOptions,
+  type Usage
+} from "@openai/codex-sdk";
+import { type TimelineEvent } from "@signal-recycler/shared";
 import { type SignalRecyclerStore } from "../store.js";
 import { type AgentAdapter } from "../types.js";
 
 const MAX_EVENT_BODY_LENGTH = 8000;
 const MAX_RAW_METADATA_LENGTH = 8000;
 const MAX_RETAINED_ITEMS = 200;
-const MAX_STDERR_LENGTH = 8000;
 const TRUNCATION_SUFFIX = "\n[truncated]";
 
-type ParsedCodexEvent = {
-  kind: "message" | "raw";
-  body: string;
-  raw: unknown;
+type ThreadLike = {
+  runStreamed(input: string): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
 };
 
-export function parseCodexJsonLine(line: string): ParsedCodexEvent {
-  try {
-    const raw = JSON.parse(line) as unknown;
-    const assistantMessage = extractAssistantMessage(raw);
-    if (assistantMessage !== null) {
-      return { kind: "message", body: assistantMessage, raw };
-    }
-
-    return { kind: "raw", body: JSON.stringify(raw), raw };
-  } catch {
-    return { kind: "raw", body: line, raw: line };
-  }
-}
+type CodexLike = {
+  startThread(options?: ThreadOptions): ThreadLike;
+  resumeThread(id: string, options?: ThreadOptions): ThreadLike;
+};
 
 export function createCodexCliAdapter(input: {
   store: SignalRecyclerStore;
   command?: string;
+  codex?: CodexLike;
 }): AgentAdapter {
-  const command = input.command ?? "codex";
+  const codex =
+    input.codex ??
+    new Codex({
+      ...(input.command ? { codexPathOverride: input.command } : {}),
+      env: stringEnv(process.env)
+    });
 
   return {
     id: "codex_cli",
-    run(runInput) {
-      return new Promise((resolve, reject) => {
-        const child = spawn(command, ["exec", "--json", "--skip-git-repo-check", runInput.prompt], {
-          cwd: runInput.workingDirectory,
-          env: process.env,
-          stdio: ["ignore", "pipe", "pipe"]
-        });
-        const assistantMessages: string[] = [];
-        const items: unknown[] = [];
-        let stderr = "";
-        let stdoutBuffer = "";
-        let settled = false;
+    async run(runInput) {
+      let codexThreadId = latestCodexThreadId(input.store.listEvents(runInput.sessionId));
+      const threadOptions: ThreadOptions = {
+        ...(runInput.workingDirectory ? { workingDirectory: runInput.workingDirectory } : {}),
+        skipGitRepoCheck: true
+      };
+      const thread = codexThreadId
+        ? codex.resumeThread(codexThreadId, threadOptions)
+        : codex.startThread(threadOptions);
+      const { events } = await thread.runStreamed(runInput.prompt);
+      const items: ThreadItem[] = [];
+      let finalResponse = "";
+      let failure: string | null = null;
 
-        const rejectRun = (error: Error, options: { killChild: boolean }) => {
-          if (settled) return;
-          settled = true;
-          if (options.killChild) {
-            try {
-              child.kill();
-            } catch {
-              // Best effort: the child may already be gone or the platform may reject the signal.
-            }
-          }
-          reject(error);
-        };
+      for await (const event of events) {
+        if (event.type === "thread.started") {
+          codexThreadId = event.thread_id;
+        }
 
-        const emitLine = (line: string) => {
-          if (settled) return;
-          if (line.length === 0) return;
-
-          const event = parseCodexJsonLine(line);
+        if (event.type === "item.completed") {
           if (items.length < MAX_RETAINED_ITEMS) {
-            items.push(toBoundedRaw(event.raw));
+            items.push(event.item);
           }
-          if (event.kind === "message") {
-            assistantMessages.push(event.body);
+          if (event.item.type === "agent_message") {
+            finalResponse = event.item.text;
           }
-          try {
-            input.store.createEvent({
-              sessionId: runInput.sessionId,
-              category: "codex_event",
-              title: event.kind === "message" ? "Codex CLI message" : "Codex CLI event",
-              body: truncateText(event.body, MAX_EVENT_BODY_LENGTH),
-              metadata: { adapter: "codex_cli", raw: toBoundedRaw(event.raw) }
-            });
-          } catch (error) {
-            rejectRun(asError(error), { killChild: true });
-          }
-        };
+        }
 
-        child.stdout.setEncoding("utf8");
-        child.stdout.on("data", (chunk: string) => {
-          if (settled) return;
-          stdoutBuffer += chunk;
-          const lines = stdoutBuffer.split(/\r?\n/);
-          stdoutBuffer = lines.pop() ?? "";
-          for (const line of lines) emitLine(line);
+        input.store.createEvent({
+          sessionId: runInput.sessionId,
+          category: "codex_event",
+          title: titleForEvent(event),
+          body: truncateText(bodyForEvent(event), MAX_EVENT_BODY_LENGTH),
+          metadata: metadataForEvent(event, codexThreadId)
         });
 
-        child.stderr.setEncoding("utf8");
-        child.stderr.on("data", (chunk: string) => {
-          stderr = truncateText(stderr + chunk, MAX_STDERR_LENGTH);
-        });
+        if (event.type === "turn.failed") {
+          failure = event.error.message;
+          break;
+        }
+      }
 
-        child.on("error", (error) => {
-          rejectRun(error, { killChild: false });
-        });
+      if (failure) throw new Error(failure);
 
-        child.on("close", (code) => {
-          if (settled) return;
-          emitLine(stdoutBuffer);
-          if (settled) return;
-          if (code !== 0) {
-            rejectRun(
-              new Error(
-                `codex exec failed with exit code ${code}: ${stderr.trim()}`
-              ),
-              { killChild: false }
-            );
-            return;
-          }
-
-          settled = true;
-          resolve({
-            finalResponse: assistantMessages.join("\n"),
-            items
-          });
-        });
-      });
+      return {
+        finalResponse,
+        items
+      };
     }
   };
 }
 
-function extractAssistantMessage(value: unknown): string | null {
-  if (!isRecord(value)) return null;
-
-  if (
-    value.type === "message" &&
-    value.role === "assistant" &&
-    typeof value.content === "string"
-  ) {
-    return value.content;
+function latestCodexThreadId(events: TimelineEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const value = events[index]?.metadata["codexThreadId"];
+    if (typeof value === "string" && value.trim()) return value;
   }
-
-  if (value.type !== "item.completed" || !isRecord(value.item)) return null;
-  if (value.item.type !== "agent_message") return null;
-  if (typeof value.item.text === "string") return value.item.text;
-  if (typeof value.item.content === "string") return value.item.content;
   return null;
 }
 
-function toBoundedRaw(raw: unknown): unknown {
-  if (typeof raw === "string") return truncateText(raw, MAX_RAW_METADATA_LENGTH);
+function titleForEvent(event: ThreadEvent): string {
+  switch (event.type) {
+    case "thread.started":
+      return "Codex thread started";
+    case "turn.started":
+      return "Codex turn started";
+    case "turn.completed":
+      return "Codex turn completed";
+    case "turn.failed":
+      return "Codex turn failed";
+    case "item.started":
+      return titleForItem(event.item, "started");
+    case "item.updated":
+      return titleForItem(event.item, "updated");
+    case "item.completed":
+      return titleForItem(event.item, "completed");
+    case "error":
+      return "Codex SDK error";
+  }
+}
 
+function titleForItem(item: ThreadItem, phase: "started" | "updated" | "completed"): string {
+  switch (item.type) {
+    case "agent_message":
+      return phase === "completed" ? "Codex CLI message" : `Codex message ${phase}`;
+    case "command_execution":
+      return `Codex command ${phase}`;
+    case "file_change":
+      return `Codex file change ${phase}`;
+    case "mcp_tool_call":
+      return `Codex MCP tool ${phase}`;
+    case "reasoning":
+      return `Codex reasoning ${phase}`;
+    case "web_search":
+      return `Codex web search ${phase}`;
+    case "todo_list":
+      return `Codex todo list ${phase}`;
+    case "error":
+      return "Codex item error";
+  }
+}
+
+function bodyForEvent(event: ThreadEvent): string {
+  switch (event.type) {
+    case "thread.started":
+      return `Codex thread ${event.thread_id} started.`;
+    case "turn.started":
+      return "Codex turn started.";
+    case "turn.completed":
+      return usageSummary(event.usage);
+    case "turn.failed":
+      return event.error.message;
+    case "item.started":
+    case "item.updated":
+    case "item.completed":
+      return bodyForItem(event.item);
+    case "error":
+      return event.message;
+  }
+}
+
+function bodyForItem(item: ThreadItem): string {
+  switch (item.type) {
+    case "agent_message":
+      return item.text;
+    case "command_execution":
+      return [`$ ${item.command}`, item.aggregated_output].filter(Boolean).join("\n");
+    case "file_change":
+      return item.changes.map((change) => `${change.kind} ${change.path}`).join("\n");
+    case "mcp_tool_call":
+      return `${item.server}.${item.tool}`;
+    case "reasoning":
+      return item.text;
+    case "web_search":
+      return item.query;
+    case "todo_list": {
+      const completed = item.items.filter((todo) => todo.completed).length;
+      return `${completed}/${item.items.length} todo items completed.`;
+    }
+    case "error":
+      return item.message;
+  }
+}
+
+function metadataForEvent(event: ThreadEvent, codexThreadId: string | null): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {
+    adapter: "codex_cli",
+    sdkEventType: event.type,
+    raw: toBoundedRaw(event)
+  };
+  if (codexThreadId) metadata.codexThreadId = codexThreadId;
+  if ("item" in event) metadata.itemType = event.item.type;
+  if (event.type === "turn.completed") metadata.usage = event.usage;
+  return metadata;
+}
+
+function usageSummary(usage: Usage): string {
+  return [
+    `Input tokens: ${usage.input_tokens}`,
+    `Cached input tokens: ${usage.cached_input_tokens}`,
+    `Output tokens: ${usage.output_tokens}`,
+    `Reasoning output tokens: ${usage.reasoning_output_tokens}`
+  ].join("\n");
+}
+
+function toBoundedRaw(raw: unknown): unknown {
   const serialized = JSON.stringify(raw);
   if (serialized.length <= MAX_RAW_METADATA_LENGTH) return raw;
 
@@ -164,10 +217,8 @@ function truncateText(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - TRUNCATION_SUFFIX.length))}${TRUNCATION_SUFFIX}`;
 }
 
-function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
 }

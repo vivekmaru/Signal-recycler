@@ -71,6 +71,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       workingDirectory,
       workingDirectoryBasename: path.basename(workingDirectory),
       availableAdapters: options.agentAdapterRegistry?.listAvailable() ?? ["default", "mock", "codex_sdk"],
+      dashboardUrl: process.env.SIGNAL_RECYCLER_DASHBOARD_URL ?? "http://127.0.0.1:5173",
       database: {
         basename: databasePath ? path.basename(databasePath) : null,
         isSmoke: databasePath.includes("smoke")

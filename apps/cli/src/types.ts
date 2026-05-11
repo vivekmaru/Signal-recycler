@@ -20,6 +20,7 @@ export type ApiConfig = {
   workingDirectory: string;
   workingDirectoryBasename: string;
   availableAdapters: Array<"default" | "mock" | "codex_sdk" | "codex_cli">;
+  dashboardUrl?: string;
 };
 
 export type SessionRecord = {
@@ -49,6 +50,7 @@ export type RunSummary = {
   agent: Agent;
   finalResponse: string;
   dashboardUrl: string;
+  sessionUrl: string;
   events: number;
   continued: boolean;
 };
