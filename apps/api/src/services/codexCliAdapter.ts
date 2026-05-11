@@ -73,8 +73,9 @@ export function createCodexCliAdapter(input: {
           metadata: metadataForEvent(event, codexThreadId)
         });
 
-        if (event.type === "turn.failed") {
-          failure = event.error.message;
+        const eventFailure = failureMessageForEvent(event);
+        if (eventFailure) {
+          failure = eventFailure;
           break;
         }
       }
@@ -95,6 +96,17 @@ function latestCodexThreadId(events: TimelineEvent[]): string | null {
     if (typeof value === "string" && value.trim()) return value;
   }
   return null;
+}
+
+function failureMessageForEvent(event: ThreadEvent): string | null {
+  switch (event.type) {
+    case "turn.failed":
+      return event.error.message;
+    case "error":
+      return event.message;
+    default:
+      return null;
+  }
 }
 
 function titleForEvent(event: ThreadEvent): string {

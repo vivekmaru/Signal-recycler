@@ -19,7 +19,8 @@ export function parseAppLocation(pathname: string): ParsedAppLocation {
   const normalized = normalizePath(pathname);
   const sessionMatch = normalized.match(/^\/sessions\/([^/]+)$/);
   if (sessionMatch) {
-    return { route: "session", sessionId: decodeURIComponent(sessionMatch[1] ?? "") };
+    const sessionId = safeDecodeURIComponent(sessionMatch[1] ?? "");
+    return sessionId ? { route: "session", sessionId } : { route: "sessions", sessionId: null };
   }
 
   const route = (Object.entries(ROUTE_PATHS) as Array<[Exclude<AppRoute, "session">, string]>).find(
@@ -39,4 +40,12 @@ export function pathForRoute(route: AppRoute, sessionId?: string | null): string
 function normalizePath(pathname: string): string {
   if (!pathname || pathname === "/") return "/";
   return pathname.replace(/\/+$/, "");
+}
+
+function safeDecodeURIComponent(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }

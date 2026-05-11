@@ -6,7 +6,8 @@ type FakeCodexEvent =
   | { type: "item.completed"; item: { id: string; type: "agent_message"; text: string } }
   | { type: "item.completed"; item: { id: string; type: "command_execution"; command: string; aggregated_output: string; status: string } }
   | { type: "turn.completed"; usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number; reasoning_output_tokens: number } }
-  | { type: "turn.failed"; error: { message: string } };
+  | { type: "turn.failed"; error: { message: string } }
+  | { type: "error"; message: string };
 
 function fakeCodex(events: FakeCodexEvent[]) {
   const startThread = vi.fn(() => fakeThread(events));
@@ -148,6 +149,26 @@ describe("createCodexCliAdapter", () => {
       expect.objectContaining({
         title: "Codex turn failed",
         metadata: expect.objectContaining({ sdkEventType: "turn.failed" })
+      })
+    );
+  });
+
+  it("rejects when a fatal SDK error event is streamed", async () => {
+    const codex = fakeCodex([
+      { type: "thread.started", thread_id: "thread_new" },
+      { type: "error", message: "stream disconnected" }
+    ]);
+    const testStore = store();
+    const adapter = createCodexCliAdapter({
+      store: testStore as never,
+      codex: codex as never
+    });
+
+    await expect(adapter.run({ sessionId: "session-1", prompt: "Run." })).rejects.toThrow("stream disconnected");
+    expect(testStore.createEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Codex SDK error",
+        metadata: expect.objectContaining({ sdkEventType: "error" })
       })
     );
   });

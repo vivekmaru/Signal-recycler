@@ -27,7 +27,9 @@ The goal is to keep local Codex CLI authentication, add Codex thread resume for 
 - Confirm `codex_sdk` remains available as the existing proxy compatibility path.
 - Confirm continuation uses the prior Codex thread id for the same Signal Recycler session.
 - Confirm dashboard events expose enough provenance for SDK event type, item type, usage, and bounded raw payload inspection.
+- Confirm SDK fatal `error` stream events fail the run the same way `turn.failed` does.
 - Confirm session deep links do not break existing dashboard navigation.
+- Confirm malformed session deep links fall back safely instead of throwing during app startup or popstate handling.
 - Confirm this branch stays inside Phase 4/4.5 and does not introduce Phase 5 source/context indexing.
 
 ## Known Non-Blockers And Expected Warnings
@@ -53,6 +55,9 @@ The goal is to keep local Codex CLI authentication, add Codex thread resume for 
   - Mock runtime smoke passed with `SIGNAL_RECYCLER_MOCK_CODEX=1 SIGNAL_RECYCLER_DB=/tmp/signal-recycler-sdk-smoke.sqlite pnpm dev`.
   - SDK-backed Codex runtime smoke passed with `OPENAI_API_KEY= SIGNAL_RECYCLER_CODEX_CLI=1 SIGNAL_RECYCLER_DB=/tmp/signal-recycler-sdk-codex-smoke.sqlite pnpm dev`.
   - Continuation smoke reused Codex thread id `019e170b-cd64-7421-9646-13d51bce9d35` for session `session_93fc8730-f45a-4c51-b899-8a62c7f1cb8f`.
+- PR review follow-up:
+  - `pnpm --filter @signal-recycler/api test -- src/services/codexCliAdapter.test.ts` passed after adding fatal SDK `error` event coverage.
+  - `pnpm --filter @signal-recycler/web test -- src/lib/routes.test.ts` passed after adding malformed session deep-link coverage.
 
 ## Out Of Scope
 

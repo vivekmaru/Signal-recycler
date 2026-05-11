@@ -16,6 +16,13 @@ describe("app routes", () => {
     });
   });
 
+  it("falls back to sessions for malformed session deep links", () => {
+    expect(parseAppLocation("/sessions/%E0%A4%A")).toEqual({
+      route: "sessions",
+      sessionId: null
+    });
+  });
+
   it("builds a session deep-link path", () => {
     expect(pathForRoute("session", "session_1/with slash")).toBe("/sessions/session_1%2Fwith%20slash");
   });
