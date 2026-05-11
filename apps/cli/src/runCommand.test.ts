@@ -176,7 +176,7 @@ describe("runCommand", () => {
       }
     } satisfies ApiClient;
 
-    await runCommand(
+    const summary = await runCommand(
       {
         command: "run",
         prompt: "continue",
@@ -191,6 +191,7 @@ describe("runCommand", () => {
 
     expect(output.some((line) => line.includes("Previous turn"))).toBe(false);
     expect(output.some((line) => line.includes("Current turn"))).toBe(true);
+    expect(summary.events).toBe(1);
   });
 
   it("writes only the final summary to stdout in JSON mode", async () => {
@@ -260,6 +261,7 @@ describe("runCommand", () => {
 
   it("does not replay previous events when continuing without watch", async () => {
     const output: string[] = [];
+    let eventCalls = 0;
     const client = {
       getConfig: async () => ({
         projectId: "demo",
@@ -271,10 +273,13 @@ describe("runCommand", () => {
         throw new Error("should not create");
       },
       runSession: async () => ({ finalResponse: "continued", candidateRules: [] }),
-      listEvents: async () => [event("event_old", "Previous turn"), event("event_new", "Current turn")]
+      listEvents: async () => {
+        eventCalls += 1;
+        return [event("event_old", "Previous turn"), event("event_new", "Current turn")];
+      }
     } satisfies ApiClient;
 
-    await runCommand(
+    const summary = await runCommand(
       {
         command: "run",
         prompt: "continue",
@@ -289,5 +294,7 @@ describe("runCommand", () => {
 
     expect(output.some((line) => line.includes("Previous turn"))).toBe(false);
     expect(output.some((line) => line.includes("Current turn"))).toBe(false);
+    expect(eventCalls).toBe(0);
+    expect(summary.events).toBe(0);
   });
 });

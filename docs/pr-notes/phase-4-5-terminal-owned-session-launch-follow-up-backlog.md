@@ -30,6 +30,12 @@ Residual risk: `sr run --session <id>` no longer replays previous terminal event
 
 Next action: after reviewers test the CLI, decide whether terminal output should group by turn, collapse classifier events by default, or add a `--verbose` mode.
 
+## P2: Clarify Event Count Semantics In CLI UX
+
+Residual risk: `Events observed` now reports current-run events instead of total session history, but future UX may need separate labels for events streamed, events produced, and total session events.
+
+Next action: when adding `sr sessions` or session detail deep links, decide whether CLI summaries should expose separate current-run and session-total counts.
+
 ## P1: Design `sr chat`
 
 Residual risk: `sr chat` is the path toward a full Signal Recycler TUI, but this design intentionally defers it.

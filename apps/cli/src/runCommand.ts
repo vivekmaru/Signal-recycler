@@ -32,8 +32,12 @@ export async function runCommand(
   }
 
   const seenEventIds = new Set<string>();
-  if (continued) {
+  const baselineEventIds = new Set<string>();
+  if (continued && shouldStreamEvents) {
     await markExistingEvents(sessionId, deps.client.listEvents, seenEventIds);
+    for (const eventId of seenEventIds) {
+      baselineEventIds.add(eventId);
+    }
   }
 
   const runPromise = deps.client.runSession(sessionId, command.prompt, command.agent);
@@ -50,7 +54,7 @@ export async function runCommand(
   }
 
   const result = await runPromise;
-  const events = await deps.client.listEvents(sessionId);
+  const events = shouldStreamEvents || !continued ? await deps.client.listEvents(sessionId) : [];
   if (shouldStreamEvents) {
     for (const event of events) {
       if (!seenEventIds.has(event.id)) {
@@ -59,13 +63,14 @@ export async function runCommand(
       }
     }
   }
+  const currentRunEvents = events.filter((event) => !baselineEventIds.has(event.id));
 
   const summary: RunSummary = {
     sessionId,
     agent: command.agent,
     finalResponse: result.finalResponse,
     dashboardUrl: deps.dashboardUrl ?? "http://127.0.0.1:5173",
-    events: events.length,
+    events: currentRunEvents.length,
     continued
   };
 
