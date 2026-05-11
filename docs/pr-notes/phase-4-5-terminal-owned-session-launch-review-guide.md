@@ -66,6 +66,13 @@ The implementation keeps `sr chat` as future terminal UX and does not implement 
 - The implementation does not add `sr chat` or a full TUI.
 - The implementation does not add `sr codex`.
 
+## Expected Warnings
+
+- `sr run ...` returns a connection error if the local API is not running at the configured `--api` URL. Start `pnpm dev` first; this is expected setup feedback, not a CLI regression.
+- `sr run --agent codex ...` returns an adapter validation error unless the API process was started with `SIGNAL_RECYCLER_CODEX_CLI=1`. Use `--agent mock` with `SIGNAL_RECYCLER_MOCK_CODEX=1` for cost-free smoke checks.
+- `sr run --json ...` intentionally suppresses human-readable progress output on stdout. Reviewers should expect only the final JSON summary there.
+- `sr run --no-watch ...` intentionally skips timeline streaming. The session remains auditable through the dashboard and session events API.
+
 ## Verification
 
 - Reviewed against `docs/validation-roadmap.md` Phase 4.5 success criteria.
