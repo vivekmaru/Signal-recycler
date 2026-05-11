@@ -14,7 +14,9 @@
     "smoke:demo": "node scripts/smoke-demo.mjs",
     "smoke:memory": "node scripts/smoke-memory-retrieval.mjs",
     "codex:install": "node scripts/codex-config.mjs install",
-    "codex:uninstall": "node scripts/codex-config.mjs uninstall"
+    "codex:uninstall": "node scripts/codex-config.mjs uninstall",
+    "cli": "pnpm --filter @signal-recycler/cli dev --",
+    "cli:build": "pnpm --filter @signal-recycler/cli build"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",
