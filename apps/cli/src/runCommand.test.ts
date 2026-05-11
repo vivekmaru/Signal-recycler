@@ -122,6 +122,7 @@ describe("runCommand", () => {
   it("prints watched events once while run is active", async () => {
     const output: string[] = [];
     let eventCalls = 0;
+    let sleepCalls = 0;
     const client = {
       getConfig: async () => ({
         projectId: "demo",
@@ -148,11 +149,18 @@ describe("runCommand", () => {
         watch: true,
         json: false
       },
-      { client, write: (line) => output.push(line), sleep: async () => undefined }
+      {
+        client,
+        write: (line) => output.push(line),
+        sleep: async () => {
+          sleepCalls += 1;
+        }
+      }
     );
 
     expect(output.filter((line) => line.includes("User prompt"))).toHaveLength(1);
     expect(output.filter((line) => line.includes("Codex response"))).toHaveLength(1);
+    expect(sleepCalls).toBe(0);
   });
 
   it("does not replay previous events when continuing a watched session", async () => {

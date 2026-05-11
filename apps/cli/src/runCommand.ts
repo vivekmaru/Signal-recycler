@@ -109,6 +109,7 @@ async function pollEventsUntilComplete(input: {
 
   while (!completed) {
     await printNewEvents(input.sessionId, input.listEvents, input.seenEventIds, input.write);
+    if (completed) break;
     await input.sleep(1000);
   }
 }

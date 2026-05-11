@@ -36,6 +36,12 @@ Residual risk: `Events observed` now reports current-run events instead of total
 
 Next action: when adding `sr sessions` or session detail deep links, decide whether CLI summaries should expose separate current-run and session-total counts.
 
+## P2: Revisit Watch Polling Controls
+
+Residual risk: watched runs no longer pay an extra sleep after fast completion, but the polling interval is still fixed at one second while longer runs are active.
+
+Next action: when terminal UX gets more real-world usage, decide whether `sr run` needs a configurable polling interval, server-sent events, or a streaming endpoint.
+
 ## P1: Design `sr chat`
 
 Residual risk: `sr chat` is the path toward a full Signal Recycler TUI, but this design intentionally defers it.
