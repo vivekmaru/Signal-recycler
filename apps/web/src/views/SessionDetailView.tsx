@@ -8,6 +8,7 @@ import { MetricTile } from "../components/MetricTile";
 import { Timeline } from "../components/Timeline";
 import { groupCandidateEvents, type CandidateEventGroup } from "../lib/eventPresenters";
 import { formatDateTime, formatTokenDelta } from "../lib/format";
+import { summarizeSdkSession } from "../lib/sdkEventPresenters";
 import { summarizeSession } from "../lib/sessionPresenters";
 import type { InspectorSelection } from "../types";
 
@@ -55,6 +56,7 @@ export function SessionDetailView({
   }, [events, selectedEventId]);
 
   const summary = useMemo(() => (session ? summarizeSession(session, events, memories) : null), [events, memories, session]);
+  const sdkSummary = useMemo(() => summarizeSdkSession(events), [events]);
   const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
   const selectedMemory = memories.find((memory) => memory.id === selectedMemoryId) ?? null;
   const retrievalEvents = events.filter((event) => event.category === "memory_retrieval");
@@ -114,6 +116,16 @@ export function SessionDetailView({
               <span>
                 adapter <span className="font-mono text-stone-900">{summary.adapter}</span>
               </span>
+              {sdkSummary.codexThreadId ? (
+                <span>
+                  codex thread <span className="font-mono text-stone-900">{sdkSummary.codexThreadId}</span>
+                </span>
+              ) : null}
+              {sdkSummary.lifecycle !== "none" ? (
+                <span>
+                  sdk session <span className="font-mono text-stone-900">{sdkLifecycleLabel(sdkSummary.lifecycle)}</span>
+                </span>
+              ) : null}
               <span>
                 started <span className="font-mono text-stone-900">{formatDateTime(session.createdAt)}</span>
               </span>
@@ -140,14 +152,18 @@ export function SessionDetailView({
         <div className="grid gap-3 border-t border-stone-200 bg-stone-50 p-3 md:grid-cols-3 xl:grid-cols-6">
           <MetricTile label="Memories injected" value={summary.memoryIn} detail={`${injectionEvents.length} injection events`} />
           <MetricTile label="Retrieval events" value={retrievalEvents.length} detail="selected and skipped memory" />
+          <MetricTile label="SDK events" value={sdkSummary.eventCount} detail={`${sdkSummary.itemCount} item events`} />
+          <MetricTile
+            label="SDK tokens"
+            value={`${sdkSummary.totalInputTokens} / ${sdkSummary.totalOutputTokens}`}
+            detail="input / output"
+          />
           <MetricTile
             label="New memory"
             value={candidateGroups.length}
             detail={candidateEventCount ? `${candidateEventCount} candidate events` : "none"}
           />
           <MetricTile label="Token delta" value={formatTokenDelta(summary.tokenDelta)} detail="compression result events" />
-          <MetricTile label="Events" value={summary.eventCount} detail={`${contextEvents.length} context events`} />
-          <MetricTile label="Inspector" value={inspectorLabel(selection)} detail="selected record" />
         </div>
         <nav className="flex gap-1 overflow-x-auto border-t border-stone-200 px-6" role="tablist">
           {[
@@ -480,11 +496,10 @@ function statusTone(status: NonNullable<ReturnType<typeof summarizeSession>>["st
   return "green";
 }
 
-function inspectorLabel(selection: InspectorSelection): string {
-  if (selection.type === "event") return "Event";
-  if (selection.type === "memory") return "Memory";
-  if (selection.type === "session") return "Session";
-  return "None";
+function sdkLifecycleLabel(lifecycle: ReturnType<typeof summarizeSdkSession>["lifecycle"]): string {
+  if (lifecycle === "new_thread") return "new thread";
+  if (lifecycle === "resumed_thread") return "resumed thread";
+  return "not recorded";
 }
 
 function metadataRecord(value: unknown): Record<string, unknown> {
