@@ -26,13 +26,7 @@ type UsageMetadata = {
 export function summarizeSdkSession(events: TimelineEvent[]): SdkSessionSummary {
   const sdkEvents = events.filter((event) => typeof event.metadata["sdkEventType"] === "string");
   const codexThreadId = latestStringMetadata(sdkEvents, "codexThreadId");
-  const hasThreadStarted = sdkEvents.some((event) => event.metadata["sdkEventType"] === "thread.started");
-  const promptCount = events.filter(isPromptEvent).length;
-  const lifecycle: SdkSessionLifecycle = !codexThreadId
-    ? "none"
-    : !hasThreadStarted || promptCount > 1
-      ? "resumed_thread"
-      : "new_thread";
+  const lifecycle = sdkLifecycle(events, codexThreadId);
 
   return sdkEvents.reduce<SdkSessionSummary>(
     (summary, event) => {
@@ -101,6 +95,27 @@ function metadataString(value: unknown): string | null {
 
 function metadataNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function sdkLifecycle(events: TimelineEvent[], codexThreadId: string | null): SdkSessionLifecycle {
+  if (!codexThreadId) return "none";
+
+  const latestPromptIndex = latestEventIndex(events, isPromptEvent);
+  const relevantEvents = latestPromptIndex >= 0 ? events.slice(latestPromptIndex + 1) : events;
+  const hasFreshThreadStart = relevantEvents.some(
+    (event) => event.metadata["sdkEventType"] === "thread.started" && event.metadata["codexThreadId"] === codexThreadId
+  );
+  if (hasFreshThreadStart) return "new_thread";
+
+  return "resumed_thread";
+}
+
+function latestEventIndex(events: TimelineEvent[], predicate: (event: TimelineEvent) => boolean): number {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event && predicate(event)) return index;
+  }
+  return -1;
 }
 
 function isPromptEvent(event: TimelineEvent): boolean {

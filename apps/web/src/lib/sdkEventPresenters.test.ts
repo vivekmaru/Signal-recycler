@@ -63,6 +63,21 @@ describe("SDK event presenters", () => {
     });
   });
 
+  it("keeps a later SDK run marked as new when it starts a fresh thread after earlier prompts", () => {
+    const summary = summarizeSdkSession([
+      event("prompt_1", { phase: "input" }),
+      event("legacy_response", { phase: "output" }),
+      event("prompt_2", { phase: "input" }),
+      event("thread_2", { sdkEventType: "thread.started", codexThreadId: "thread_2" }),
+      event("message", { sdkEventType: "item.completed", itemType: "agent_message", codexThreadId: "thread_2" })
+    ]);
+
+    expect(summary).toMatchObject({
+      codexThreadId: "thread_2",
+      lifecycle: "new_thread"
+    });
+  });
+
   it("extracts compact event facts for the inspector", () => {
     expect(
       sdkEventFacts(

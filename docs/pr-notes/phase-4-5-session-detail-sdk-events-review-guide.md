@@ -10,7 +10,7 @@ It does not change the session runtime, adapter contracts, memory retrieval, or 
 
 - Web presenter layer:
   - Adds SDK event presenters for Codex thread id, SDK lifecycle, event counts, item counts, usage token totals, and compact event facts.
-  - Treats multi-prompt sessions with a persisted Codex thread id as resumed/continued sessions.
+  - Infers SDK lifecycle from the latest SDK run segment: a `thread.started` event after the latest prompt is a new thread, while SDK events continuing without that event are resumed.
 - Session Detail:
   - Shows Codex thread id and SDK lifecycle in the session header when available.
   - Adds SDK event and SDK token metric tiles.
@@ -25,6 +25,7 @@ It does not change the session runtime, adapter contracts, memory retrieval, or 
 - Confirm the dashboard now makes SDK-owned sessions easier to audit without requiring raw JSON first.
 - Confirm non-SDK sessions still render cleanly with zero SDK counts and no SDK header noise.
 - Confirm resumed Signal Recycler sessions are labeled as resumed when multiple prompts share a Codex thread.
+- Confirm sessions with earlier non-SDK prompts are still labeled as new when the later SDK run starts a fresh thread.
 - Confirm raw metadata remains available for debugging.
 - Confirm this branch does not introduce Phase 5 context indexing or change memory retrieval behavior.
 
@@ -43,6 +44,8 @@ It does not change the session runtime, adapter contracts, memory retrieval, or 
   - `pnpm --filter @signal-recycler/web test -- src/lib/sdkEventPresenters.test.ts` failed before the presenter module existed.
   - `pnpm --filter @signal-recycler/web test -- src/lib/sdkEventPresenters.test.ts` failed until multi-prompt sessions were classified as resumed.
   - `pnpm --filter @signal-recycler/web test -- src/lib/sdkEventPresenters.test.ts` passed after implementation.
+  - PR review follow-up: `pnpm --filter @signal-recycler/web test -- src/lib/sdkEventPresenters.test.ts` failed until a fresh `thread.started` event after older prompts remained classified as new.
+  - PR review follow-up: `pnpm --filter @signal-recycler/web test -- src/lib/sdkEventPresenters.test.ts` passed after lifecycle inference was tied to the latest SDK run segment.
 - Focused checks:
   - `pnpm --filter @signal-recycler/web test -- src/lib/sdkEventPresenters.test.ts src/lib/eventPresenters.test.ts src/lib/sessionPresenters.test.ts` passed.
   - `pnpm --filter @signal-recycler/web type-check` passed.
