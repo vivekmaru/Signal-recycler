@@ -4,6 +4,7 @@ import { createSession, listEvents, runSession } from "./api";
 import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { useDashboardData } from "./hooks/useDashboardData";
+import { parseAppLocation, pathForRoute } from "./lib/routes";
 import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
 import { DashboardView } from "./views/DashboardView";
@@ -16,14 +17,15 @@ import { SessionsView } from "./views/SessionsView";
 const adapterOptions = [
   { value: "default", label: "Auto adapter" },
   { value: "mock", label: "Mock" },
-  { value: "codex_cli", label: "Codex CLI" },
-  { value: "codex_sdk", label: "Codex SDK" }
+  { value: "codex_cli", label: "Codex CLI (SDK-backed)" },
+  { value: "codex_sdk", label: "Codex SDK proxy" }
 ] satisfies Array<{ value: AgentAdapter; label: string }>;
 
 export function App() {
   const data = useDashboardData();
-  const [route, setRoute] = useState<AppRoute>("dashboard");
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const initialLocation = parseAppLocation(window.location.pathname);
+  const [route, setRoute] = useState<AppRoute>(initialLocation.route);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(initialLocation.sessionId);
   const [optimisticSession, setOptimisticSession] = useState<SessionRecord | null>(null);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [newSessionRunning, setNewSessionRunning] = useState(false);
@@ -61,7 +63,7 @@ export function App() {
       const session = await createSession(title);
       setOptimisticSession(session);
       setSelectedSessionId(session.id);
-      setRoute("session");
+      navigate("session", session.id);
       setNewSessionOpen(false);
 
       try {
@@ -78,13 +80,21 @@ export function App() {
   }
 
   function handleRouteChange(nextRoute: AppRoute) {
+    navigate(nextRoute, nextRoute === "session" ? selectedSessionId : null);
+  }
+
+  function navigate(nextRoute: AppRoute, sessionId?: string | null) {
+    const nextPath = pathForRoute(nextRoute, sessionId);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState(null, "", nextPath);
+    }
     setRoute(nextRoute);
   }
 
   const selectedSession =
     data.sessions.find((session) => session.id === selectedSessionId) ??
     (optimisticSession?.id === selectedSessionId ? optimisticSession : null) ??
-    data.sessions[0] ??
+    (selectedSessionId ? null : (data.sessions[0] ?? null)) ??
     null;
   const selectedSessionIdForDetail = route === "session" ? (selectedSession?.id ?? null) : null;
   const selectedSessionFirehoseEventIdentity = selectedSessionIdForDetail
@@ -122,6 +132,17 @@ export function App() {
     };
   }, [selectedSessionFirehoseEventIdentity, selectedSessionIdForDetail, sessionDetailReloadKey]);
 
+  useEffect(() => {
+    function handlePopState() {
+      const nextLocation = parseAppLocation(window.location.pathname);
+      setRoute(nextLocation.route);
+      if (nextLocation.sessionId) setSelectedSessionId(nextLocation.sessionId);
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   return (
     <AppShell
       config={data.config}
@@ -145,10 +166,10 @@ export function App() {
                 events={data.events}
                 eventsBySession={data.eventsBySession}
                 memories={data.memories}
-                onOpenMemory={() => setRoute("memory")}
+                onOpenMemory={() => navigate("memory")}
                 onOpenSession={(sessionId) => {
                   setSelectedSessionId(sessionId);
-                  setRoute("session");
+                  navigate("session", sessionId);
                 }}
                 sessions={data.sessions}
               />
@@ -159,7 +180,7 @@ export function App() {
                 memories={data.memories}
                 onOpenSession={(sessionId) => {
                   setSelectedSessionId(sessionId);
-                  setRoute("session");
+                  navigate("session", sessionId);
                 }}
                 sessions={data.sessions}
               />
@@ -170,7 +191,7 @@ export function App() {
                 eventsError={sessionDetailError}
                 eventsLoading={sessionDetailLoading}
                 memories={data.memories}
-                onBack={() => setRoute("sessions")}
+                onBack={() => navigate("sessions")}
                 onRetryEvents={() => setSessionDetailReloadKey((key) => key + 1)}
                 session={selectedSession}
               />

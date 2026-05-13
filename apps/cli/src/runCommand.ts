@@ -71,18 +71,25 @@ export async function runCommand(
     if (!continued) return true;
     return eventCreatedAtOrAfter(event, runStartedAt);
   });
+  const dashboardUrl = deps.dashboardUrl ?? config.dashboardUrl ?? "http://127.0.0.1:5173";
 
   const summary: RunSummary = {
     sessionId,
     agent: command.agent,
     finalResponse: result.finalResponse,
-    dashboardUrl: deps.dashboardUrl ?? "http://127.0.0.1:5173",
+    dashboardUrl,
+    sessionUrl: buildSessionUrl(dashboardUrl, sessionId),
     events: currentRunEvents.length,
     continued
   };
 
   deps.write(command.json ? formatJsonSummary(summary) : formatSummary(summary));
   return summary;
+}
+
+export function buildSessionUrl(dashboardUrl: string, sessionId: string): string {
+  const base = dashboardUrl.replace(/\/$/, "");
+  return `${base}/sessions/${encodeURIComponent(sessionId)}`;
 }
 
 function eventCreatedAtOrAfter(event: TimelineEvent, timestamp: Date): boolean {

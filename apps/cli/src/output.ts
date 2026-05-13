@@ -17,7 +17,7 @@ export function formatSummary(summary: RunSummary): string {
     "",
     `Session: ${summary.sessionId}`,
     `Agent: ${summary.agent}`,
-    `Dashboard: ${summary.dashboardUrl}`,
+    `Dashboard: ${summary.sessionUrl}`,
     `Events observed: ${summary.events}`
   ];
 
@@ -36,6 +36,7 @@ export function formatJsonSummary(summary: RunSummary): string {
       status: "completed",
       finalResponse: summary.finalResponse,
       dashboardUrl: summary.dashboardUrl,
+      sessionUrl: summary.sessionUrl,
       events: summary.events,
       continued: summary.continued
     },

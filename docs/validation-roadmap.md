@@ -69,7 +69,7 @@ Headless CLI adapter:
 ```text
 Signal Recycler receives prompt
   -> retrieve/inject memory into prompt
-  -> spawn headless CLI, e.g. `codex exec --json ...`
+  -> run headless CLI through a structured adapter, e.g. Codex SDK wrapping local Codex CLI JSON events
   -> stream JSONL events into dashboard
   -> capture final message, command events, file changes, and failures
   -> post-run distill/learn/audit async
@@ -338,7 +338,7 @@ Move from Codex-specific proxy behavior toward Signal Recycler-owned sessions ba
 Success criteria:
 
 - The existing proxy/runner path remains available but receives only maintenance-level investment unless a concrete use case requires more.
-- Codex headless mode is supported through `codex exec --json` so users can rely on their existing Codex CLI authentication/subscription.
+- Codex headless mode is supported through a structured Codex CLI adapter so users can rely on their existing Codex CLI authentication/subscription.
 - Claude Code headless mode is evaluated as a second adapter path.
 - Additional integrations can call a stable API to retain, retrieve, inject, and audit memory.
 - Agent-specific adapters are thin; core memory logic is shared.
