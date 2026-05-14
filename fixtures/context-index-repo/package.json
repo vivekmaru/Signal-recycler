@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "test": "pnpm vitest",
+    "type-check": "tsc --noEmit"
+  }
+}

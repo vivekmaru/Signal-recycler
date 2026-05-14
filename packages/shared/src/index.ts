@@ -157,6 +157,84 @@ export const memoryRetrievalResultSchema = z.object({
 });
 export type MemoryRetrievalResult = z.infer<typeof memoryRetrievalResultSchema>;
 
+export const contextSourceTypeSchema = z.enum([
+  "docs",
+  "agent_instructions",
+  "package",
+  "source",
+  "config",
+  "tests"
+]);
+export type ContextSourceType = z.infer<typeof contextSourceTypeSchema>;
+
+export const contextChunkSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  sourceType: contextSourceTypeSchema,
+  path: z.string().min(1),
+  lineStart: z.number().int().positive(),
+  lineEnd: z.number().int().positive(),
+  hash: z.string().min(16),
+  mtimeMs: z.number().nonnegative(),
+  sizeBytes: z.number().int().nonnegative(),
+  text: z.string(),
+  indexedAt: z.string()
+});
+export type ContextChunk = z.infer<typeof contextChunkSchema>;
+
+export const contextIndexStatusSchema = z.object({
+  projectId: z.string(),
+  workdir: z.string(),
+  totalChunks: z.number().int().nonnegative(),
+  totalFiles: z.number().int().nonnegative(),
+  lastIndexedAt: z.string().nullable(),
+  bySourceType: z.array(
+    z.object({
+      sourceType: contextSourceTypeSchema,
+      files: z.number().int().nonnegative(),
+      chunks: z.number().int().nonnegative()
+    })
+  )
+});
+export type ContextIndexStatus = z.infer<typeof contextIndexStatusSchema>;
+
+export const contextRetrievalRequestSchema = z.object({
+  prompt: z.string().min(1),
+  limit: z.number().int().positive().max(20).default(8),
+  sourceTypes: z.array(contextSourceTypeSchema).optional()
+});
+export type ContextRetrievalRequest = z.infer<typeof contextRetrievalRequestSchema>;
+
+export const contextRetrievalResultSchema = z.object({
+  query: z.string(),
+  selected: z.array(
+    z.object({
+      chunkId: z.string(),
+      rank: z.number().int().positive(),
+      score: z.number(),
+      reason: z.string(),
+      sourceType: contextSourceTypeSchema,
+      path: z.string(),
+      lineStart: z.number().int().positive(),
+      lineEnd: z.number().int().positive(),
+      hash: z.string()
+    })
+  ),
+  skipped: z.array(
+    z.object({
+      chunkId: z.string(),
+      reason: z.enum(["not_relevant", "source_type_filter", "project_mismatch"])
+    })
+  ),
+  metrics: z.object({
+    indexedChunks: z.number().int().nonnegative(),
+    selectedChunks: z.number().int().nonnegative(),
+    skippedChunks: z.number().int().nonnegative(),
+    limit: z.number().int().positive()
+  })
+});
+export type ContextRetrievalResult = z.infer<typeof contextRetrievalResultSchema>;
+
 export const ruleConfidenceSchema = memoryConfidenceSchema;
 export type RuleConfidence = MemoryConfidence;
 
