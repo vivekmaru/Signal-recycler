@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -117,9 +117,31 @@ describe("context index scanner", () => {
       path: "indented.ts",
       lineStart: 1,
       lineEnd: 2,
-      text: "  export const value = 1;\n  "
+      text: "  export const value = 1;\n  \n"
     });
     expect(first.chunks[0]?.hash).toBe(second.chunks[0]?.hash);
+  });
+
+  it("keeps terminal newline changes visible in chunk hashes", () => {
+    const withNewline = mkdtempSync(join(tmpdir(), "signal-recycler-newline-scan-"));
+    const withoutNewline = mkdtempSync(join(tmpdir(), "signal-recycler-no-newline-scan-"));
+    writeFileSync(join(withNewline, "file.ts"), "export const value = 1;\n");
+    writeFileSync(join(withoutNewline, "file.ts"), "export const value = 1;");
+
+    const first = scanContextIndex({
+      projectId: "fixture",
+      workdir: withNewline,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const second = scanContextIndex({
+      projectId: "fixture",
+      workdir: withoutNewline,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(first.chunks[0]?.text).toBe("export const value = 1;\n");
+    expect(second.chunks[0]?.text).toBe("export const value = 1;");
+    expect(first.chunks[0]?.hash).not.toBe(second.chunks[0]?.hash);
   });
 
   it("skips files larger than the max file byte limit", () => {
@@ -150,5 +172,25 @@ describe("context index scanner", () => {
     });
 
     expect(result.chunks.map((chunk) => chunk.path)).toEqual(["src/safe.ts"]);
+  });
+
+  it("skips unreadable files instead of aborting", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-unreadable-scan-"));
+    const unreadablePath = join(workdir, "unreadable.ts");
+    writeFileSync(join(workdir, "safe.ts"), "export const safe = true;\n");
+    writeFileSync(unreadablePath, "export const hidden = true;\n");
+    chmodSync(unreadablePath, 0);
+
+    try {
+      const result = scanContextIndex({
+        projectId: "fixture",
+        workdir,
+        indexedAt: "2026-05-14T00:00:00.000Z"
+      });
+
+      expect(result.chunks.map((chunk) => chunk.path)).toEqual(["safe.ts"]);
+    } finally {
+      chmodSync(unreadablePath, 0o600);
+    }
   });
 });

@@ -45,7 +45,7 @@ It does not expose API routes or update the dashboard yet. The goal is to make t
 - `pnpm --filter @signal-recycler/shared type-check`
   - Passed.
 - `pnpm --filter @signal-recycler/api test -- contextIndexStore.test.ts contextIndexScanner.test.ts contextIndexRetrieval.test.ts`
-  - Passed: 20 test files, 160 tests.
+  - Passed: 20 test files, 162 tests.
 - `pnpm --filter @signal-recycler/api type-check`
   - Passed.
 

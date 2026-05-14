@@ -67,21 +67,16 @@ export function scanContextIndex(input: ScanContextIndexInput): { chunks: Contex
     const path = normalizePath(relative(input.workdir, absolutePath));
     if (!shouldIndexPath(path)) continue;
 
-    const stats = statSync(absolutePath);
-    if (stats.size > maxFileBytes) continue;
-
-    const bytes = readFileSync(absolutePath);
-    if (looksBinary(bytes)) continue;
-
-    const text = bytes.toString("utf8");
+    const file = readIndexableFile(absolutePath, maxFileBytes);
+    if (!file) continue;
     chunks.push(
       ...chunkFile({
         projectId: input.projectId,
         sourceType: classifySourceType(path),
         path,
-        text,
-        mtimeMs: stats.mtimeMs,
-        sizeBytes: stats.size,
+        text: file.text,
+        mtimeMs: file.mtimeMs,
+        sizeBytes: file.sizeBytes,
         indexedAt: input.indexedAt
       })
     );
@@ -110,6 +105,25 @@ function walkFiles(root: string): string[] {
   }
 
   return files;
+}
+
+function readIndexableFile(
+  absolutePath: string,
+  maxFileBytes: number
+): { text: string; mtimeMs: number; sizeBytes: number } | null {
+  try {
+    const stats = statSync(absolutePath);
+    if (stats.size > maxFileBytes) return null;
+    const bytes = readFileSync(absolutePath);
+    if (looksBinary(bytes)) return null;
+    return {
+      text: bytes.toString("utf8"),
+      mtimeMs: stats.mtimeMs,
+      sizeBytes: stats.size
+    };
+  } catch {
+    return null;
+  }
 }
 
 function shouldIndexPath(path: string): boolean {
@@ -143,7 +157,7 @@ function chunkFile(input: {
 
   for (let start = 0; start < lines.length; start += MAX_LINES_PER_CHUNK) {
     const selected = lines.slice(start, start + MAX_LINES_PER_CHUNK);
-    const text = selected.join("\n");
+    const text = selected.join("");
     if (text.trim().length === 0) continue;
 
     chunks.push({
@@ -165,7 +179,9 @@ function chunkFile(input: {
 
 function splitLines(text: string): string[] {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
+  const lines = normalized.match(/[^\n]*(?:\n|$)/g) ?? [];
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
 }
 
 function chunkHash(path: string, lineStart: number, text: string): string {
