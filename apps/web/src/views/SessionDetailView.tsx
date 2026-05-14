@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { GitCompare, OctagonX, RotateCcw } from "lucide-react";
-import type { MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { GitCompare, OctagonX, RotateCcw, Search } from "lucide-react";
+import type { AgentAdapter, MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
+import type { MemoryRetrievalPreview } from "../api";
+import { previewMemoryRetrieval } from "../api";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { Button } from "../components/Button";
 import { InspectorPanel } from "../components/InspectorPanel";
@@ -9,6 +11,7 @@ import { Timeline } from "../components/Timeline";
 import { groupCandidateEvents, type CandidateEventGroup } from "../lib/eventPresenters";
 import { formatDateTime, formatTokenDelta } from "../lib/format";
 import { summarizeSdkSession } from "../lib/sdkEventPresenters";
+import { buildMemoryPreviewRows, runAdapterOptions } from "../lib/sessionRunPresenters";
 import { summarizeSession } from "../lib/sessionPresenters";
 import type { InspectorSelection } from "../types";
 
@@ -26,7 +29,11 @@ export function SessionDetailView({
   eventsLoading,
   eventsError,
   memories,
+  availableAdapters,
+  runRunning,
+  runError,
   onBack,
+  onRunPrompt,
   onRetryEvents
 }: {
   session: SessionRecord | null;
@@ -34,7 +41,11 @@ export function SessionDetailView({
   eventsLoading: boolean;
   eventsError: string | null;
   memories: MemoryRecord[];
+  availableAdapters: AgentAdapter[];
+  runRunning: boolean;
+  runError: string | null;
   onBack: () => void;
+  onRunPrompt: (prompt: string, adapter: AgentAdapter) => Promise<void>;
   onRetryEvents: () => void;
 }) {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(events[0]?.id ?? null);
@@ -165,6 +176,13 @@ export function SessionDetailView({
           />
           <MetricTile label="Token delta" value={formatTokenDelta(summary.tokenDelta)} detail="compression result events" />
         </div>
+        <SessionContinuationPanel
+          availableAdapters={availableAdapters}
+          runError={runError}
+          running={runRunning}
+          session={session}
+          onRunPrompt={onRunPrompt}
+        />
         <nav className="flex gap-1 overflow-x-auto border-t border-stone-200 px-6" role="tablist">
           {[
             ["timeline", `Timeline ${events.length}`],
@@ -282,6 +300,238 @@ function SessionEventsState({
             </Button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+type SubmittedPreview = {
+  prompt: string;
+  result: MemoryRetrievalPreview;
+};
+
+function SessionContinuationPanel({
+  session,
+  availableAdapters,
+  running,
+  runError,
+  onRunPrompt
+}: {
+  session: SessionRecord;
+  availableAdapters: AgentAdapter[];
+  running: boolean;
+  runError: string | null;
+  onRunPrompt: (prompt: string, adapter: AgentAdapter) => Promise<void>;
+}) {
+  const options = runAdapterOptions(availableAdapters);
+  const [prompt, setPrompt] = useState("");
+  const [adapter, setAdapter] = useState<AgentAdapter>(options[0]?.value ?? "default");
+  const [preview, setPreview] = useState<SubmittedPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const requestIdRef = useRef(0);
+  const promptRef = useRef("");
+  const hasPrompt = prompt.trim().length > 0;
+
+  useEffect(() => {
+    if (options.some((option) => option.value === adapter)) return;
+    setAdapter(options[0]?.value ?? "default");
+  }, [adapter, options]);
+
+  function handlePromptChange(nextPrompt: string) {
+    setPrompt(nextPrompt);
+    promptRef.current = nextPrompt;
+    setPreviewError(null);
+
+    const trimmedPrompt = nextPrompt.trim();
+    if (preview && trimmedPrompt !== preview.prompt) {
+      setPreview(null);
+    }
+  }
+
+  async function runPreview() {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || previewLoading || running) return;
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setPreview(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
+
+    try {
+      const result = await previewMemoryRetrieval({ prompt: trimmedPrompt, limit: 5 });
+      if (requestIdRef.current === requestId && promptRef.current.trim() === trimmedPrompt) {
+        setPreview({ prompt: trimmedPrompt, result });
+      }
+    } catch (error: unknown) {
+      if (requestIdRef.current === requestId && promptRef.current.trim() === trimmedPrompt) {
+        setPreviewError(errorMessage(error));
+      }
+    } finally {
+      if (requestIdRef.current === requestId) {
+        setPreviewLoading(false);
+      }
+    }
+  }
+
+  async function submitRun() {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || running) return;
+
+    try {
+      await onRunPrompt(trimmedPrompt, adapter);
+      setPrompt("");
+      promptRef.current = "";
+      setPreview(null);
+      setPreviewError(null);
+    } catch {
+      // The parent renders runError with the adapter/API failure message.
+    }
+  }
+
+  return (
+    <section className="border-t border-stone-200 bg-white px-6 py-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,460px)]">
+        <form
+          className="min-w-0"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitRun();
+          }}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-stone-950">Continue session</h2>
+              <p className="mt-1 text-sm text-stone-500">
+                Run the next prompt through this Signal Recycler session and keep the audit trail attached to{" "}
+                <span className="font-mono text-stone-900">{session.id}</span>.
+              </p>
+            </div>
+            <label className="min-w-44 text-xs font-semibold uppercase tracking-wide text-stone-500">
+              Adapter
+              <select
+                className="mt-1 block h-9 w-full rounded-md border border-stone-300 bg-white px-2 text-sm normal-case tracking-normal text-stone-950 outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-100"
+                disabled={running || previewLoading}
+                onChange={(event) => setAdapter(event.target.value as AgentAdapter)}
+                value={adapter}
+              >
+                {options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <textarea
+            className="mt-3 min-h-24 w-full resize-y rounded-md border border-stone-300 p-3 text-sm text-stone-950 outline-none transition placeholder:text-stone-400 focus:border-amber-600 focus:ring-2 focus:ring-amber-100"
+            disabled={running}
+            onChange={(event) => handlePromptChange(event.target.value)}
+            placeholder="Ask the agent to continue from this session..."
+            value={prompt}
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button disabled={!hasPrompt || previewLoading || running} onClick={() => void runPreview()} type="button">
+              <Search size={16} />
+              {previewLoading ? "Previewing" : "Preview memory"}
+            </Button>
+            <Button disabled={!hasPrompt || running} type="submit" variant="primary">
+              {running ? "Running..." : "Run in this session"}
+            </Button>
+            <span className="text-xs text-stone-500">
+              Preview covers implemented memory retrieval only; source chunks come with Phase 5 indexing.
+            </span>
+          </div>
+          {runError ? (
+            <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{runError}</div>
+          ) : null}
+        </form>
+        <MemoryPreviewPanel error={previewError} preview={preview} />
+      </div>
+    </section>
+  );
+}
+
+function MemoryPreviewPanel({
+  preview,
+  error
+}: {
+  preview: SubmittedPreview | null;
+  error: string | null;
+}) {
+  if (error) {
+    return <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>;
+  }
+
+  if (!preview) {
+    return (
+      <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 p-4 text-sm text-stone-500">
+        No memory context preview yet. Preview before running when you want to inspect selected and skipped
+        memories.
+      </div>
+    );
+  }
+
+  const rows = buildMemoryPreviewRows(preview.result);
+
+  return (
+    <div className="rounded-md border border-stone-200 bg-stone-50 p-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="font-semibold text-stone-950">Memory context preview</h3>
+          <p className="mt-1 max-w-md truncate text-xs text-stone-500">{preview.prompt}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {rows.metrics.map((metric) => (
+            <Badge key={metric.label} tone={metric.tone}>
+              {metric.label} {metric.value}
+            </Badge>
+          ))}
+        </div>
+      </div>
+      <PreviewDecisionList label="Selected memory" rows={rows.selectedRows} />
+      <PreviewDecisionList label="Skipped memory" rows={rows.skippedRows} />
+    </div>
+  );
+}
+
+function PreviewDecisionList({
+  label,
+  rows
+}: {
+  label: string;
+  rows: Array<
+    | ReturnType<typeof buildMemoryPreviewRows>["selectedRows"][number]
+    | ReturnType<typeof buildMemoryPreviewRows>["skippedRows"][number]
+  >;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="mt-3 rounded-md border border-stone-200 bg-white p-3 text-xs text-stone-500">
+        {label}: none
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-stone-200 bg-white p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
+      <div className="mt-2 space-y-2">
+        {rows.map((row) => (
+          <div className="min-w-0 text-xs leading-5 text-stone-600" key={`${label}-${row.id}`}>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="font-mono font-semibold text-stone-900">{row.id}</span>
+              {"rank" in row && row.rank ? <Badge>rank {row.rank}</Badge> : null}
+              {"score" in row ? <Badge>score {row.score}</Badge> : null}
+              {"title" in row ? <Badge tone="blue">{row.title}</Badge> : null}
+            </div>
+            <div className="mt-1 break-words text-stone-600">
+              {"detail" in row ? <span className="font-mono text-stone-500">{row.detail}: </span> : null}
+              {row.reason}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -518,4 +768,8 @@ function metadataScalar(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
