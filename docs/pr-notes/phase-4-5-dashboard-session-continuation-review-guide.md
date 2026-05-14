@@ -38,6 +38,7 @@ The scope anchor is Phase 4.5: dashboard-owned sessions should become a primary 
 - Confirm New Session still uses the same adapter options as before.
 - Confirm failed runs surface errors without clearing the prompt.
 - Confirm stale preview failures do not render after the user edits or clears the prompt.
+- Confirm preview errors are cleared as soon as the prompt changes after a failed preview request.
 
 ## Known Non-Blockers And Expected Warnings
 

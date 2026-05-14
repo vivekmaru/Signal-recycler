@@ -341,6 +341,7 @@ function SessionContinuationPanel({
   function handlePromptChange(nextPrompt: string) {
     setPrompt(nextPrompt);
     promptRef.current = nextPrompt;
+    setPreviewError(null);
 
     const trimmedPrompt = nextPrompt.trim();
     if (preview && trimmedPrompt !== preview.prompt) {
