@@ -144,6 +144,42 @@ describe("context index scanner", () => {
     expect(first.chunks[0]?.hash).not.toBe(second.chunks[0]?.hash);
   });
 
+  it("preserves original line endings in chunk text and hash input", () => {
+    const crlfWorkdir = mkdtempSync(join(tmpdir(), "signal-recycler-crlf-scan-"));
+    const lfWorkdir = mkdtempSync(join(tmpdir(), "signal-recycler-lf-scan-"));
+    writeFileSync(join(crlfWorkdir, "file.ts"), "const first = 1;\r\nconst second = 2;\r\n");
+    writeFileSync(join(lfWorkdir, "file.ts"), "const first = 1;\nconst second = 2;\n");
+
+    const crlf = scanContextIndex({
+      projectId: "fixture",
+      workdir: crlfWorkdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const lf = scanContextIndex({
+      projectId: "fixture",
+      workdir: lfWorkdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(crlf.chunks[0]?.text).toBe("const first = 1;\r\nconst second = 2;\r\n");
+    expect(lf.chunks[0]?.text).toBe("const first = 1;\nconst second = 2;\n");
+    expect(crlf.chunks[0]?.hash).not.toBe(lf.chunks[0]?.hash);
+  });
+
+  it("reports indexable paths even when no chunks are emitted", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-empty-path-scan-"));
+    writeFileSync(join(workdir, "blank.ts"), "  \n\t\n");
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.paths).toEqual(["blank.ts"]);
+    expect(result.chunks).toEqual([]);
+  });
+
   it("skips files larger than the max file byte limit", () => {
     const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-large-scan-"));
     writeFileSync(join(workdir, "README.md"), "small docs\n");
@@ -175,6 +211,8 @@ describe("context index scanner", () => {
   });
 
   it("skips unreadable files instead of aborting", () => {
+    if (process.platform === "win32") return;
+
     const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-unreadable-scan-"));
     const unreadablePath = join(workdir, "unreadable.ts");
     writeFileSync(join(workdir, "safe.ts"), "export const safe = true;\n");
@@ -191,6 +229,29 @@ describe("context index scanner", () => {
       expect(result.chunks.map((chunk) => chunk.path)).toEqual(["safe.ts"]);
     } finally {
       chmodSync(unreadablePath, 0o600);
+    }
+  });
+
+  it("skips unreadable directories instead of aborting", () => {
+    if (process.platform === "win32") return;
+
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-unreadable-dir-scan-"));
+    const unreadablePath = join(workdir, "private");
+    writeFileSync(join(workdir, "README.md"), "indexed docs\n");
+    mkdirSync(unreadablePath);
+    writeFileSync(join(unreadablePath, "hidden.ts"), "export const hidden = true;\n");
+    chmodSync(unreadablePath, 0);
+
+    try {
+      const result = scanContextIndex({
+        projectId: "fixture",
+        workdir,
+        indexedAt: "2026-05-14T00:00:00.000Z"
+      });
+
+      expect(result.chunks.map((chunk) => chunk.path)).toEqual(["README.md"]);
+    } finally {
+      chmodSync(unreadablePath, 0o700);
     }
   });
 });

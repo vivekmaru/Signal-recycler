@@ -180,6 +180,32 @@ describe("context index store", () => {
     });
   });
 
+  it("removes stale chunks when an incremental path has no chunks", () => {
+    const store = createContextIndexStore(dbPath());
+    store.upsertChunks({
+      projectId: "demo",
+      workdir: "/repo",
+      chunks: [
+        chunk({
+          sourceType: "docs",
+          path: "README.md",
+          hash: "hash_old_readme_00000001",
+          text: "obsolete setup notes"
+        })
+      ]
+    });
+
+    store.upsertChunks({
+      projectId: "demo",
+      workdir: "/repo",
+      replacedPaths: ["README.md"],
+      chunks: []
+    });
+
+    expect(store.status("demo", "/repo").totalChunks).toBe(0);
+    expect(store.search({ projectId: "demo", query: "obsolete", limit: 5 })).toEqual([]);
+  });
+
   it("filters search results and chunk ids by source type", () => {
     const store = createContextIndexStore(dbPath());
     store.upsertChunks({

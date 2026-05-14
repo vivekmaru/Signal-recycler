@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import { type ContextChunk, type ContextSourceType } from "@signal-recycler/shared";
 
@@ -59,8 +59,12 @@ const CONFIG_BASENAMES = new Set([
   "vitest.config.ts"
 ]);
 
-export function scanContextIndex(input: ScanContextIndexInput): { chunks: ContextIndexChunk[] } {
+export function scanContextIndex(input: ScanContextIndexInput): {
+  chunks: ContextIndexChunk[];
+  paths: string[];
+} {
   const chunks: ContextIndexChunk[] = [];
+  const paths: string[] = [];
   const maxFileBytes = input.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
 
   for (const absolutePath of walkFiles(input.workdir)) {
@@ -69,6 +73,7 @@ export function scanContextIndex(input: ScanContextIndexInput): { chunks: Contex
 
     const file = readIndexableFile(absolutePath, maxFileBytes);
     if (!file) continue;
+    paths.push(path);
     chunks.push(
       ...chunkFile({
         projectId: input.projectId,
@@ -82,16 +87,19 @@ export function scanContextIndex(input: ScanContextIndexInput): { chunks: Contex
     );
   }
 
-  return { chunks };
+  return { chunks, paths };
 }
 
 function walkFiles(root: string): string[] {
-  if (!existsSync(root)) return [];
-
   const files: string[] = [];
-  const entries = readdirSync(root, { withFileTypes: true }).sort((left, right) =>
-    left.name.localeCompare(right.name)
-  );
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name)
+    );
+  } catch {
+    return files;
+  }
 
   for (const entry of entries) {
     if (EXCLUDED_SEGMENTS.has(entry.name)) continue;
@@ -178,8 +186,7 @@ function chunkFile(input: {
 }
 
 function splitLines(text: string): string[] {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = normalized.match(/[^\n]*(?:\n|$)/g) ?? [];
+  const lines = text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) ?? [];
   if (lines.at(-1) === "") lines.pop();
   return lines;
 }

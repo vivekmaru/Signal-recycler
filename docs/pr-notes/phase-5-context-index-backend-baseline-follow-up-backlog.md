@@ -4,7 +4,7 @@
 
 Residual risk: the backend store/scanner/retrieval code is not reachable from the app yet.
 
-Next action: add `GET /api/context-index/status`, `POST /api/context-index/reindex`, and `POST /api/context-index/retrieve` using the new backend services.
+Next action: add `GET /api/context-index/status`, `POST /api/context-index/reindex`, and `POST /api/context-index/retrieve` using the new backend services. When wiring incremental scans, pass scanner `paths` into store `replacedPaths` so whitespace-only files can clear stale chunks.
 
 ## P1: Add Context Index Evals
 

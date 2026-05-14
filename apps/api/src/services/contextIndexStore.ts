@@ -12,6 +12,7 @@ type UpsertChunksInput = {
   projectId: string;
   workdir: string;
   chunks: IndexableContextChunk[];
+  replacedPaths?: string[];
 };
 
 type ReplaceProjectIndexInput = UpsertChunksInput;
@@ -44,7 +45,7 @@ export function createContextIndexStore(path: string) {
     upsertChunks(input: UpsertChunksInput): void {
       db.exec("BEGIN");
       try {
-        for (const path of uniquePaths(input.chunks)) {
+        for (const path of uniquePaths(input.chunks, input.replacedPaths)) {
           deleteProjectPathChunks(db, input.projectId, path);
         }
         for (const chunk of input.chunks) {
@@ -253,8 +254,8 @@ function deleteProjectPathChunks(db: DatabaseSync, projectId: string, path: stri
   db.prepare("DELETE FROM context_chunks WHERE project_id = ? AND path = ?").run(projectId, path);
 }
 
-function uniquePaths(chunks: IndexableContextChunk[]): string[] {
-  return Array.from(new Set(chunks.map((chunk) => chunk.path)));
+function uniquePaths(chunks: IndexableContextChunk[], replacedPaths: string[] = []): string[] {
+  return Array.from(new Set([...replacedPaths, ...chunks.map((chunk) => chunk.path)]));
 }
 
 function mapChunk(row: Record<string, unknown>): ContextChunk {
