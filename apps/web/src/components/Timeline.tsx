@@ -1,6 +1,7 @@
 import type { TimelineEvent } from "@signal-recycler/shared";
 import { eventTone, groupTimelineEvents } from "../lib/eventPresenters";
 import { formatDateTime } from "../lib/format";
+import { sdkEventBadges } from "../lib/sdkEventPresenters";
 import { Badge } from "./Badge";
 
 export function Timeline({
@@ -33,36 +34,57 @@ export function Timeline({
           </div>
           <div className="space-y-1">
             {group.events.map((event) => (
-              <button
-                aria-pressed={selectedEventId === event.id}
-                className={`grid w-full grid-cols-[72px_18px_minmax(0,1fr)] gap-3 border-l-2 px-3 py-3 text-left text-sm transition ${
-                  selectedEventId === event.id
-                    ? "border-amber-500 bg-amber-50"
-                    : "border-transparent bg-white hover:bg-stone-50"
-                }`}
+              <TimelineRow
+                event={event}
+                isSelected={selectedEventId === event.id}
                 key={event.id}
-                onClick={() => onSelectEvent(event)}
-                type="button"
-              >
-                <span className="pt-1 font-mono text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
-                <span className={`mt-1.5 size-3 rounded-full ${dotClass(event.category)}`} />
-                <span className="min-w-0">
-                  <span className="flex min-w-0 flex-wrap items-center gap-2">
-                    <strong className="truncate text-stone-950">{event.title}</strong>
-                    <Badge tone={eventTone(event.category)}>{event.category.replaceAll("_", " ")}</Badge>
-                  </span>
-                  {event.body ? (
-                    <span className="mt-1 block truncate text-stone-600">{event.body}</span>
-                  ) : (
-                    <span className="mt-1 block text-stone-400">No event body recorded.</span>
-                  )}
-                </span>
-              </button>
+                onSelectEvent={onSelectEvent}
+              />
             ))}
           </div>
         </section>
       ))}
     </div>
+  );
+}
+
+function TimelineRow({
+  event,
+  isSelected,
+  onSelectEvent
+}: {
+  event: TimelineEvent;
+  isSelected: boolean;
+  onSelectEvent: (event: TimelineEvent) => void;
+}) {
+  const sdkBadges = sdkEventBadges(event);
+
+  return (
+    <button
+      aria-pressed={isSelected}
+      className={`grid w-full grid-cols-[72px_18px_minmax(0,1fr)] gap-3 border-l-2 px-3 py-3 text-left text-sm transition ${
+        isSelected ? "border-amber-500 bg-amber-50" : "border-transparent bg-white hover:bg-stone-50"
+      }`}
+      onClick={() => onSelectEvent(event)}
+      type="button"
+    >
+      <span className="pt-1 font-mono text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
+      <span className={`mt-1.5 size-3 rounded-full ${dotClass(event.category)}`} />
+      <span className="min-w-0">
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <strong className="truncate text-stone-950">{event.title}</strong>
+          <Badge tone={eventTone(event.category)}>{event.category.replaceAll("_", " ")}</Badge>
+          {sdkBadges.map((badge) => (
+            <Badge key={badge}>{badge}</Badge>
+          ))}
+        </span>
+        {event.body ? (
+          <span className="mt-1 block truncate text-stone-600">{event.body}</span>
+        ) : (
+          <span className="mt-1 block text-stone-400">No event body recorded.</span>
+        )}
+      </span>
+    </button>
   );
 }
 

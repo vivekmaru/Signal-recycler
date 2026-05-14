@@ -1,6 +1,7 @@
 import type { InspectorSelection } from "../types";
 import { formatDateTime } from "../lib/format";
 import { memoryScopeLabel, memorySourceLabel, memoryStatusLabel, memoryTypeLabel } from "../lib/memoryPresenters";
+import { sdkEventFacts } from "../lib/sdkEventPresenters";
 import { Badge, type BadgeTone } from "./Badge";
 import { Button } from "./Button";
 
@@ -68,6 +69,7 @@ function SessionInspector({ selection }: { selection: Extract<InspectorSelection
 
 function EventInspector({ selection }: { selection: Extract<InspectorSelection, { type: "event" }> }) {
   const metadataKeys = Object.keys(selection.event.metadata);
+  const sdkFacts = sdkEventFacts(selection.event);
 
   return (
     <>
@@ -93,6 +95,19 @@ function EventInspector({ selection }: { selection: Extract<InspectorSelection, 
           <dd className="truncate font-mono text-stone-800">{selection.event.sessionId}</dd>
         </dl>
       </section>
+      {sdkFacts.length > 0 ? (
+        <section>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Codex SDK</div>
+          <dl className="grid grid-cols-[112px_minmax(0,1fr)] gap-2 text-xs">
+            {sdkFacts.map((fact) => (
+              <div className="contents" key={fact.label}>
+                <dt className="text-stone-500">{fact.label}</dt>
+                <dd className="truncate font-mono text-stone-800">{fact.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
       <section>
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">Metadata</div>
         {metadataKeys.length === 0 ? (
