@@ -5,6 +5,7 @@ import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { useDashboardData } from "./hooks/useDashboardData";
 import { parseAppLocation, pathForRoute } from "./lib/routes";
+import { runAdapterOptions } from "./lib/sessionRunPresenters";
 import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
 import { DashboardView } from "./views/DashboardView";
@@ -13,13 +14,6 @@ import { EvalsView } from "./views/EvalsView";
 import { MemoryView } from "./views/MemoryView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { SessionsView } from "./views/SessionsView";
-
-const adapterOptions = [
-  { value: "default", label: "Auto adapter" },
-  { value: "mock", label: "Mock" },
-  { value: "codex_cli", label: "Codex CLI (SDK-backed)" },
-  { value: "codex_sdk", label: "Codex SDK proxy" }
-] satisfies Array<{ value: AgentAdapter; label: string }>;
 
 export function App() {
   const data = useDashboardData();
@@ -33,6 +27,8 @@ export function App() {
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const [sessionDetailError, setSessionDetailError] = useState<string | null>(null);
   const [sessionDetailReloadKey, setSessionDetailReloadKey] = useState(0);
+  const [sessionRunRunning, setSessionRunRunning] = useState(false);
+  const [sessionRunError, setSessionRunError] = useState<string | null>(null);
 
   const metrics = useMemo(
     () =>
@@ -79,6 +75,26 @@ export function App() {
     }
   }
 
+  async function handleContinueSession(prompt: string, adapter: AgentAdapter) {
+    if (!selectedSessionIdForDetail) throw new Error("No selected session is available to continue.");
+
+    setSessionRunRunning(true);
+    setSessionRunError(null);
+    data.setError(null);
+
+    try {
+      await runSession(selectedSessionIdForDetail, prompt, adapter);
+      await data.refresh();
+      setSessionDetailReloadKey((key) => key + 1);
+    } catch (continueError: unknown) {
+      const message = errorMessage(continueError);
+      setSessionRunError(message);
+      throw new Error(message);
+    } finally {
+      setSessionRunRunning(false);
+    }
+  }
+
   function handleRouteChange(nextRoute: AppRoute) {
     navigate(nextRoute, nextRoute === "session" ? selectedSessionId : null);
   }
@@ -108,12 +124,14 @@ export function App() {
       setSessionDetailEvents([]);
       setSessionDetailError(null);
       setSessionDetailLoading(false);
+      setSessionRunError(null);
       return;
     }
 
     let cancelled = false;
     setSessionDetailEvents([]);
     setSessionDetailError(null);
+    setSessionRunError(null);
     setSessionDetailLoading(true);
 
     listEvents(selectedSessionIdForDetail)
@@ -187,12 +205,16 @@ export function App() {
             ) : null}
             {route === "session" ? (
               <SessionDetailView
+                availableAdapters={data.config?.availableAdapters ?? ["default"]}
                 events={sessionDetailEvents}
                 eventsError={sessionDetailError}
                 eventsLoading={sessionDetailLoading}
                 memories={data.memories}
                 onBack={() => navigate("sessions")}
+                onRunPrompt={handleContinueSession}
                 onRetryEvents={() => setSessionDetailReloadKey((key) => key + 1)}
+                runError={sessionRunError}
+                runRunning={sessionRunRunning}
                 session={selectedSession}
               />
             ) : null}
@@ -298,7 +320,7 @@ function NewSessionModal({
   onCancel: () => void;
   onSubmit: (prompt: string, adapter: AgentAdapter) => void;
 }) {
-  const options = adapterOptions.filter((option) => availableAdapters.includes(option.value));
+  const options = runAdapterOptions(availableAdapters);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4">
