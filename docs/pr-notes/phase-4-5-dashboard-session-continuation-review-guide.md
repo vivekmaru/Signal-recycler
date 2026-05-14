@@ -37,6 +37,7 @@ The scope anchor is Phase 4.5: dashboard-owned sessions should become a primary 
 - Confirm memory preview language does not imply source chunks or Phase 5 indexing exists.
 - Confirm New Session still uses the same adapter options as before.
 - Confirm failed runs surface errors without clearing the prompt.
+- Confirm stale preview failures do not render after the user edits or clears the prompt.
 
 ## Known Non-Blockers And Expected Warnings
 
@@ -67,6 +68,10 @@ The scope anchor is Phase 4.5: dashboard-owned sessions should become a primary 
   - Confirmed the Continue Session panel rendered.
   - Previewed `Run package manager validation for this repo.` and saw `Selected 1`.
   - Ran the prompt with the mock adapter and confirmed the browser stayed on the same `/sessions/:sessionId` URL.
+- Review follow-up checks:
+  - `pnpm --filter @signal-recycler/web test -- sessionRunPresenters.test.ts` passed.
+  - `pnpm --filter @signal-recycler/web type-check` passed.
+  - `git diff --check` passed.
 
 The dev server was stopped after smoke verification.
 

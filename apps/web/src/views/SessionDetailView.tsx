@@ -364,7 +364,7 @@ function SessionContinuationPanel({
         setPreview({ prompt: trimmedPrompt, result });
       }
     } catch (error: unknown) {
-      if (requestIdRef.current === requestId) {
+      if (requestIdRef.current === requestId && promptRef.current.trim() === trimmedPrompt) {
         setPreviewError(errorMessage(error));
       }
     } finally {
