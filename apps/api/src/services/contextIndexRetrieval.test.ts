@@ -93,6 +93,22 @@ describe("context index retrieval", () => {
     expect(result.metrics.skippedChunks).toBe(3);
   });
 
+  it("treats an empty source type filter as unfiltered retrieval", () => {
+    const result = retrieveContextChunks({
+      store: storeWithFixture(),
+      projectId: "demo",
+      query: "pnpm type-check",
+      limit: 3,
+      sourceTypes: []
+    });
+
+    expect(result.selected[0]).toMatchObject({
+      path: "AGENTS.md",
+      sourceType: "agent_instructions"
+    });
+    expect(result.skipped.every((decision) => decision.reason === "not_relevant")).toBe(true);
+  });
+
   it("does not fall back to broad retrieval for low-signal prompts", () => {
     const result = retrieveContextChunks({
       store: storeWithFixture(),

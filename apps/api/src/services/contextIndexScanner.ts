@@ -143,8 +143,8 @@ function chunkFile(input: {
 
   for (let start = 0; start < lines.length; start += MAX_LINES_PER_CHUNK) {
     const selected = lines.slice(start, start + MAX_LINES_PER_CHUNK);
-    const text = selected.join("\n").trim();
-    if (!text) continue;
+    const text = selected.join("\n");
+    if (text.trim().length === 0) continue;
 
     chunks.push({
       projectId: input.projectId,

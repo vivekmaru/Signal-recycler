@@ -16,11 +16,13 @@ const DEFAULT_CONTEXT_RETRIEVAL_LIMIT = 8;
 
 export function retrieveContextChunks(input: RetrieveContextChunksInput): ContextRetrievalResult {
   const limit = normalizeLimit(input.limit);
+  const activeSourceTypes =
+    input.sourceTypes && input.sourceTypes.length > 0 ? input.sourceTypes : undefined;
   const hits = input.store.search({
     projectId: input.projectId,
     query: input.query,
     limit,
-    sourceTypes: input.sourceTypes
+    sourceTypes: activeSourceTypes
   });
   const selected = hits.map((hit) => ({
     chunkId: hit.chunk.id,
@@ -40,7 +42,7 @@ export function retrieveContextChunks(input: RetrieveContextChunksInput): Contex
     .map((chunk) => ({
       chunkId: chunk.id,
       reason:
-        input.sourceTypes && !input.sourceTypes.includes(chunk.sourceType)
+        activeSourceTypes && !activeSourceTypes.includes(chunk.sourceType)
           ? ("source_type_filter" as const)
           : ("not_relevant" as const)
     }));

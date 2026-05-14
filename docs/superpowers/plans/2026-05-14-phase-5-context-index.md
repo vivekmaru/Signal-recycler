@@ -1,6 +1,6 @@
 # Phase 5 Context Index Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Use Beads (`bd`) for durable task tracking; the step labels below are execution order, not markdown task state.
 
 **Goal:** Add a local repository context index that stores docs, agent instruction files, package files, and selected source chunks with provenance, then retrieves relevant chunks for prompts without mixing them into durable memory.
 
@@ -182,7 +182,7 @@ POST /api/context-index/retrieve
 
 - Modify: `packages/shared/src/index.ts`
 
-- [ ] **Step 1: Add failing schema tests through API/service imports**
+Step 1: **Add failing schema tests through API/service imports**
 
 Run:
 
@@ -192,11 +192,11 @@ pnpm --filter @signal-recycler/shared type-check
 
 Expected: passes before edits. This establishes the baseline.
 
-- [ ] **Step 2: Add context source and retrieval schemas**
+Step 2: **Add context source and retrieval schemas**
 
 Append the schema block from **Public API Shape** after `memoryRetrievalResultSchema`.
 
-- [ ] **Step 3: Export inferred types**
+Step 3: **Export inferred types**
 
 Add:
 
@@ -208,7 +208,7 @@ export type ContextRetrievalRequest = z.infer<typeof contextRetrievalRequestSche
 export type ContextRetrievalResult = z.infer<typeof contextRetrievalResultSchema>;
 ```
 
-- [ ] **Step 4: Verify shared package**
+Step 4: **Verify shared package**
 
 Run:
 
@@ -218,7 +218,7 @@ pnpm --filter @signal-recycler/shared type-check
 
 Expected: passes.
 
-- [ ] **Step 5: Commit**
+Step 5: **Commit**
 
 ```bash
 git add packages/shared/src/index.ts
@@ -232,7 +232,7 @@ git commit -m "feat: add context index schemas"
 - Create: `apps/api/src/services/contextIndexStore.ts`
 - Create: `apps/api/src/services/contextIndexStore.test.ts`
 
-- [ ] **Step 1: Write failing store tests**
+Step 1: **Write failing store tests**
 
 Create `apps/api/src/services/contextIndexStore.test.ts`:
 
@@ -365,7 +365,7 @@ describe("context index store", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+Step 2: **Run tests to verify failure**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexStore.test.ts
@@ -373,7 +373,7 @@ pnpm --filter @signal-recycler/api test -- contextIndexStore.test.ts
 
 Expected: fails because `contextIndexStore.ts` does not exist.
 
-- [ ] **Step 3: Implement context index store**
+Step 3: **Implement context index store**
 
 Create `apps/api/src/services/contextIndexStore.ts`:
 
@@ -647,7 +647,7 @@ function tokenizeSearchQuery(query: string): string[] {
 }
 ```
 
-- [ ] **Step 4: Run store tests**
+Step 4: **Run store tests**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexStore.test.ts
@@ -655,7 +655,7 @@ pnpm --filter @signal-recycler/api test -- contextIndexStore.test.ts
 
 Expected: 3 tests pass.
 
-- [ ] **Step 5: Commit**
+Step 5: **Commit**
 
 ```bash
 git add apps/api/src/services/contextIndexStore.ts apps/api/src/services/contextIndexStore.test.ts
@@ -670,7 +670,7 @@ git commit -m "feat: add context index store"
 - Create: `apps/api/src/services/contextIndexScanner.test.ts`
 - Create fixture files under `fixtures/context-index-repo/`
 
-- [ ] **Step 1: Create fixture repo**
+Step 1: **Create fixture repo**
 
 Create:
 
@@ -760,7 +760,7 @@ dist
 This file must not be indexed.
 ```
 
-- [ ] **Step 2: Write failing scanner tests**
+Step 2: **Write failing scanner tests**
 
 Create `apps/api/src/services/contextIndexScanner.test.ts`:
 
@@ -821,7 +821,7 @@ describe("context index scanner", () => {
 });
 ```
 
-- [ ] **Step 3: Run tests to verify failure**
+Step 3: **Run tests to verify failure**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexScanner.test.ts
@@ -829,7 +829,7 @@ pnpm --filter @signal-recycler/api test -- contextIndexScanner.test.ts
 
 Expected: fails because `contextIndexScanner.ts` does not exist.
 
-- [ ] **Step 4: Implement scanner**
+Step 4: **Implement scanner**
 
 Create `apps/api/src/services/contextIndexScanner.ts`:
 
@@ -979,7 +979,7 @@ function looksBinary(value: string): boolean {
 }
 ```
 
-- [ ] **Step 5: Run scanner tests**
+Step 5: **Run scanner tests**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexScanner.test.ts
@@ -987,7 +987,7 @@ pnpm --filter @signal-recycler/api test -- contextIndexScanner.test.ts
 
 Expected: 2 tests pass.
 
-- [ ] **Step 6: Commit**
+Step 6: **Commit**
 
 ```bash
 git add fixtures/context-index-repo apps/api/src/services/contextIndexScanner.ts apps/api/src/services/contextIndexScanner.test.ts
@@ -1001,7 +1001,7 @@ git commit -m "feat: scan repo context chunks"
 - Create: `apps/api/src/services/contextIndexRetrieval.ts`
 - Create: `apps/api/src/services/contextIndexRetrieval.test.ts`
 
-- [ ] **Step 1: Write failing retrieval tests**
+Step 1: **Write failing retrieval tests**
 
 Create `apps/api/src/services/contextIndexRetrieval.test.ts`:
 
@@ -1089,7 +1089,7 @@ describe("context index retrieval", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+Step 2: **Run tests to verify failure**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexRetrieval.test.ts
@@ -1097,7 +1097,7 @@ pnpm --filter @signal-recycler/api test -- contextIndexRetrieval.test.ts
 
 Expected: fails because `contextIndexRetrieval.ts` does not exist.
 
-- [ ] **Step 3: Implement retrieval service**
+Step 3: **Implement retrieval service**
 
 Create `apps/api/src/services/contextIndexRetrieval.ts`:
 
@@ -1159,7 +1159,7 @@ function normalizeLimit(limit: number | undefined): number {
 }
 ```
 
-- [ ] **Step 4: Improve skipped accounting**
+Step 4: **Improve skipped accounting**
 
 Extend `ContextIndexStore` with `listChunkIds(projectId: string, sourceTypes?: ContextSourceType[])` and use it to report non-selected chunks as `not_relevant` or `source_type_filter`.
 
@@ -1178,7 +1178,7 @@ const skipped = input.store
   }));
 ```
 
-- [ ] **Step 5: Run retrieval tests**
+Step 5: **Run retrieval tests**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexRetrieval.test.ts contextIndexStore.test.ts
@@ -1186,7 +1186,7 @@ pnpm --filter @signal-recycler/api test -- contextIndexRetrieval.test.ts context
 
 Expected: tests pass.
 
-- [ ] **Step 6: Commit**
+Step 6: **Commit**
 
 ```bash
 git add apps/api/src/services/contextIndexRetrieval.ts apps/api/src/services/contextIndexRetrieval.test.ts apps/api/src/services/contextIndexStore.ts apps/api/src/services/contextIndexStore.test.ts
@@ -1201,7 +1201,7 @@ git commit -m "feat: retrieve indexed source context"
 - Modify: `apps/api/src/app.ts`
 - Modify: `apps/api/src/server.test.ts`
 
-- [ ] **Step 1: Write route tests**
+Step 1: **Write route tests**
 
 Add tests to `apps/api/src/server.test.ts`:
 
@@ -1240,7 +1240,7 @@ it("reindexes repository context and retrieves source chunks", async () => {
 
 Use the existing `server.test.ts` helper style. If there is no fixture helper, add `const fixtureContextRepoPath = resolve(process.cwd(), "../../fixtures/context-index-repo");`.
 
-- [ ] **Step 2: Run route tests to verify failure**
+Step 2: **Run route tests to verify failure**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- server.test.ts
@@ -1248,7 +1248,7 @@ pnpm --filter @signal-recycler/api test -- server.test.ts
 
 Expected: fails because routes do not exist.
 
-- [ ] **Step 3: Implement route module**
+Step 3: **Implement route module**
 
 Create `apps/api/src/routes/contextIndex.ts`:
 
@@ -1318,7 +1318,7 @@ function stripProjectId(chunk: Omit<ContextChunk, "id">): Omit<ContextChunk, "id
 }
 ```
 
-- [ ] **Step 4: Register routes**
+Step 4: **Register routes**
 
 In `apps/api/src/app.ts`, import `registerContextIndexRoutes` and register it after rule routes:
 
@@ -1336,7 +1336,7 @@ await registerContextIndexRoutes(app, {
 });
 ```
 
-- [ ] **Step 5: Run route tests**
+Step 5: **Run route tests**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- server.test.ts contextIndexStore.test.ts contextIndexScanner.test.ts contextIndexRetrieval.test.ts
@@ -1344,7 +1344,7 @@ pnpm --filter @signal-recycler/api test -- server.test.ts contextIndexStore.test
 
 Expected: tests pass.
 
-- [ ] **Step 6: Commit**
+Step 6: **Commit**
 
 ```bash
 git add apps/api/src/routes/contextIndex.ts apps/api/src/app.ts apps/api/src/server.test.ts
@@ -1359,7 +1359,7 @@ git commit -m "feat: add context index api"
 - Create: `apps/api/src/evals/suites/contextIndexEval.test.ts`
 - Modify: `apps/api/src/evals/run.ts`
 
-- [ ] **Step 1: Write eval suite**
+Step 1: **Write eval suite**
 
 Create `apps/api/src/evals/suites/contextIndexEval.ts`:
 
@@ -1453,7 +1453,7 @@ function averageMetric(
 }
 ```
 
-- [ ] **Step 2: Add eval test**
+Step 2: **Add eval test**
 
 Create `apps/api/src/evals/suites/contextIndexEval.test.ts`:
 
@@ -1479,11 +1479,11 @@ describe("context index eval", () => {
 });
 ```
 
-- [ ] **Step 3: Register eval suite**
+Step 3: **Register eval suite**
 
 In `apps/api/src/evals/run.ts`, import and include `runContextIndexEval()` in the local suite list.
 
-- [ ] **Step 4: Run eval tests**
+Step 4: **Run eval tests**
 
 ```bash
 pnpm --filter @signal-recycler/api test -- contextIndexEval.test.ts
@@ -1492,7 +1492,7 @@ pnpm eval
 
 Expected: context index eval passes and the report includes `Context Index Retrieval`.
 
-- [ ] **Step 5: Commit**
+Step 5: **Commit**
 
 ```bash
 git add apps/api/src/evals/suites/contextIndexEval.ts apps/api/src/evals/suites/contextIndexEval.test.ts apps/api/src/evals/run.ts .signal-recycler/evals/latest.json .signal-recycler/evals/latest.md
@@ -1507,7 +1507,7 @@ git commit -m "feat: add context index evals"
 - Modify: `apps/web/src/views/ContextIndexView.tsx`
 - Add or modify web presenter tests if helper extraction is needed.
 
-- [ ] **Step 1: Add API helpers**
+Step 1: **Add API helpers**
 
 In `apps/web/src/api.ts`, add:
 
@@ -1542,7 +1542,7 @@ export async function previewContextRetrieval(
 }
 ```
 
-- [ ] **Step 2: Replace preview text and API calls**
+Step 2: **Replace preview text and API calls**
 
 In `apps/web/src/views/ContextIndexView.tsx`:
 
@@ -1568,7 +1568,7 @@ vector
 reranker
 ```
 
-- [ ] **Step 3: Run web checks**
+Step 3: **Run web checks**
 
 ```bash
 pnpm --filter @signal-recycler/web type-check
@@ -1577,7 +1577,7 @@ pnpm --filter @signal-recycler/web test -- ContextIndexView
 
 Expected: type-check passes. If no component test exists, add a presenter helper test for source-type coverage formatting before committing.
 
-- [ ] **Step 4: Commit**
+Step 4: **Commit**
 
 ```bash
 git add apps/web/src/api.ts apps/web/src/views/ContextIndexView.tsx apps/web/src/lib apps/web/src/views
@@ -1591,7 +1591,7 @@ git commit -m "feat: show indexed context retrieval"
 - Create: `docs/research/qmd-context-index-evaluation.md`
 - Modify: `docs/pr-notes/phase-5-context-index-follow-up-backlog.md`
 
-- [ ] **Step 1: Record QMD state**
+Step 1: **Record QMD state**
 
 Run:
 
@@ -1603,7 +1603,7 @@ qmd search "Phase 5 Context Index Signal Recycler" -c agents -n 5
 qmd search "Phase 5 Context Index Signal Recycler" -c docs -n 5
 ```
 
-- [ ] **Step 2: Write evaluation note**
+Step 2: **Write evaluation note**
 
 Create `docs/research/qmd-context-index-evaluation.md` with:
 
@@ -1634,7 +1634,7 @@ After Phase 5 SQLite indexing lands, compare:
 - QMD `query --no-rerank` behavior if query expansion is unstable.
 ```
 
-- [ ] **Step 3: Commit**
+Step 3: **Commit**
 
 ```bash
 git add docs/research/qmd-context-index-evaluation.md docs/pr-notes/phase-5-context-index-follow-up-backlog.md
@@ -1650,7 +1650,7 @@ git commit -m "docs: evaluate qmd for context indexing"
 - Create: `docs/pr-notes/phase-5-context-index-review-guide.md`
 - Create: `docs/pr-notes/phase-5-context-index-follow-up-backlog.md`
 
-- [ ] **Step 1: Add README section after Memory APIs**
+Step 1: **Add README section after Memory APIs**
 
 Add:
 
@@ -1666,7 +1666,7 @@ Phase 5 adds local repository context indexing. Source/doc chunks are separate f
 The initial implementation uses SQLite FTS5/BM25. It does not use vector search, embeddings, cosine scoring, reranking, or JIT rehydration.
 ```
 
-- [ ] **Step 2: Update roadmap status**
+Step 2: **Update roadmap status**
 
 Under Phase 5 in `docs/validation-roadmap.md`, add:
 
@@ -1674,7 +1674,7 @@ Under Phase 5 in `docs/validation-roadmap.md`, add:
 Current status: implementation started. The first Phase 5 slice adds SQLite FTS5/BM25 source/doc chunk indexing with provenance, context retrieval preview, and deterministic recall/precision evals. QMD remains an optional integration candidate.
 ```
 
-- [ ] **Step 3: Create review guide**
+Step 3: **Create review guide**
 
 Create `docs/pr-notes/phase-5-context-index-review-guide.md`:
 
@@ -1732,7 +1732,7 @@ This PR starts Phase 5 by adding a local source/doc context index. It keeps sour
 - Compare/replay execution.
 ```
 
-- [ ] **Step 4: Create follow-up backlog**
+Step 4: **Create follow-up backlog**
 
 Create `docs/pr-notes/phase-5-context-index-follow-up-backlog.md`:
 
@@ -1776,7 +1776,7 @@ Residual risk: SQLite builds without FTS5 will fail context indexing at runtime.
 Next action: add a health field that reports FTS5 availability for memory and context indexes.
 ```
 
-- [ ] **Step 5: Run final verification**
+Step 5: **Run final verification**
 
 ```bash
 pnpm test
@@ -1788,7 +1788,7 @@ git diff --check
 
 Expected: all commands pass.
 
-- [ ] **Step 6: Commit**
+Step 6: **Commit**
 
 ```bash
 git add README.md docs/validation-roadmap.md docs/pr-notes/phase-5-context-index-review-guide.md docs/pr-notes/phase-5-context-index-follow-up-backlog.md
@@ -1798,7 +1798,7 @@ git commit -m "docs: document phase 5 context index"
 ## Self-Review
 
 - Spec coverage: every Phase 5 success criterion maps to a task: schemas/store/scanner/routes cover provenance indexing; retrieval service and evals cover recall/precision; separate schemas and services keep source chunks distinct from durable memory; QMD evaluation note covers optional QMD assessment.
-- Template scan: this plan avoids `TBD`, `TODO`, and fake metrics. The implementation PR guide must record observed verification results after commands run.
+- Template scan: this plan avoids placeholder markers and fake metrics. The implementation PR guide must record observed verification results after commands run.
 - Type consistency: public schema names use `ContextChunk`, `ContextIndexStatus`, `ContextRetrievalRequest`, and `ContextRetrievalResult` consistently across API, web, and eval tasks.
 - Scope check: no vector retrieval, reranking, cloud sync, JIT rehydration, or compare/replay execution is included.
 

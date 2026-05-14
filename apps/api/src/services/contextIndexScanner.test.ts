@@ -98,6 +98,30 @@ describe("context index scanner", () => {
     expect(first.chunks.every((chunk) => !chunk.path.includes("\\"))).toBe(true);
   });
 
+  it("preserves boundary whitespace inside chunk text and hash input", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-whitespace-scan-"));
+    writeFileSync(join(workdir, "indented.ts"), "  export const value = 1;\n  \n");
+
+    const first = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const second = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:01:00.000Z"
+    });
+
+    expect(first.chunks[0]).toMatchObject({
+      path: "indented.ts",
+      lineStart: 1,
+      lineEnd: 2,
+      text: "  export const value = 1;\n  "
+    });
+    expect(first.chunks[0]?.hash).toBe(second.chunks[0]?.hash);
+  });
+
   it("skips files larger than the max file byte limit", () => {
     const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-large-scan-"));
     writeFileSync(join(workdir, "README.md"), "small docs\n");
