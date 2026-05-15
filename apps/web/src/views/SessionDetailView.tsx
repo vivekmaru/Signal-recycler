@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, OctagonX, RotateCcw, Search } from "lucide-react";
 import type { AgentAdapter, MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
 import type { MemoryRetrievalPreview } from "../api";
@@ -65,6 +65,12 @@ export function SessionDetailView({
       setInspectorMode("event");
     }
   }, [events, selectedEventId]);
+
+  const handleSelectEvent = useCallback((event: TimelineEvent) => {
+    setSelectedEventId(event.id);
+    setSelectedMemoryId(null);
+    setInspectorMode("event");
+  }, []);
 
   const summary = useMemo(() => (session ? summarizeSession(session, events, memories) : null), [events, memories, session]);
   const sdkSummary = useMemo(() => summarizeSdkSession(events), [events]);
@@ -218,21 +224,13 @@ export function SessionDetailView({
             <Timeline
               events={events}
               selectedEventId={inspectorMode === "event" ? selectedEventId : null}
-              onSelectEvent={(event) => {
-                setSelectedEventId(event.id);
-                setSelectedMemoryId(null);
-                setInspectorMode("event");
-              }}
+              onSelectEvent={handleSelectEvent}
             />
           ) : null}
           {tab === "context" ? (
             <ContextEnvelopePreview
               events={contextEvents}
-              onSelectEvent={(event) => {
-                setSelectedEventId(event.id);
-                setSelectedMemoryId(null);
-                setInspectorMode("event");
-              }}
+              onSelectEvent={handleSelectEvent}
             />
           ) : null}
           {tab === "diff" ? (
@@ -245,11 +243,7 @@ export function SessionDetailView({
             <CandidateList
               groups={candidateGroups}
               memories={memories}
-              onSelectEvent={(event) => {
-                setSelectedEventId(event.id);
-                setSelectedMemoryId(null);
-                setInspectorMode("event");
-              }}
+              onSelectEvent={handleSelectEvent}
               onSelectMemory={(memoryId) => {
                 setSelectedMemoryId(memoryId);
                 setInspectorMode("memory");

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { TimelineEvent } from "@signal-recycler/shared";
 import { eventTone, groupTimelineEvents } from "../lib/eventPresenters";
 import { formatDateTime } from "../lib/format";
@@ -48,7 +49,7 @@ export function Timeline({
   );
 }
 
-function TimelineRow({
+const TimelineRow = memo(function TimelineRow({
   event,
   isSelected,
   onSelectEvent
@@ -86,7 +87,7 @@ function TimelineRow({
       </span>
     </button>
   );
-}
+});
 
 function dotClass(category: TimelineEvent["category"]): string {
   if (category === "memory_retrieval" || category === "memory_injection") return "bg-sky-500";
