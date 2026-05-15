@@ -39,7 +39,12 @@ export function groupTimelineEvents(events: TimelineEvent[]): TimelineGroup[] {
   const grouped = new Map<TimelineGroupId, TimelineEvent[]>();
   for (const event of events) {
     const id = eventGroupId(event);
-    grouped.set(id, [...(grouped.get(id) ?? []), event]);
+    const existing = grouped.get(id);
+    if (existing) {
+      existing.push(event);
+    } else {
+      grouped.set(id, [event]);
+    }
   }
   return Array.from(grouped.entries()).map(([id, groupEvents]) => ({
     id,
@@ -55,7 +60,12 @@ export function groupCandidateEvents(events: TimelineEvent[]): CandidateEventGro
     if (event.category !== "rule_candidate" && event.category !== "rule_auto_approved") continue;
     const ruleId = typeof event.metadata["ruleId"] === "string" ? event.metadata["ruleId"] : null;
     const id = ruleId ?? event.id;
-    grouped.set(id, [...(grouped.get(id) ?? []), event]);
+    const existing = grouped.get(id);
+    if (existing) {
+      existing.push(event);
+    } else {
+      grouped.set(id, [event]);
+    }
   }
 
   return Array.from(grouped.entries()).flatMap(([id, groupEvents]) => {
