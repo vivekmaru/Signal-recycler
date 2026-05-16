@@ -36,24 +36,31 @@ export function ContextIndexView() {
   const [preview, setPreview] = useState<SubmittedPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const statusRequestIdRef = useRef(0);
   const requestIdRef = useRef(0);
   const promptRef = useRef("");
   const sourceFilterKey = selectedSourceTypes.join(",");
+  const sourceFilterRef = useRef(sourceFilterKey);
+  sourceFilterRef.current = sourceFilterKey;
 
   useEffect(() => {
     let cancelled = false;
+    const statusRequestId = statusRequestIdRef.current + 1;
+    statusRequestIdRef.current = statusRequestId;
     setStatusLoading(true);
     setStatusError(null);
 
     fetchContextIndexStatus()
       .then((result) => {
-        if (!cancelled) setStatus(result);
+        if (!cancelled && statusRequestIdRef.current === statusRequestId) setStatus(result);
       })
       .catch((error: unknown) => {
-        if (!cancelled) setStatusError(errorMessage(error, "Context index status failed."));
+        if (!cancelled && statusRequestIdRef.current === statusRequestId) {
+          setStatusError(errorMessage(error, "Context index status failed."));
+        }
       })
       .finally(() => {
-        if (!cancelled) setStatusLoading(false);
+        if (!cancelled && statusRequestIdRef.current === statusRequestId) setStatusLoading(false);
       });
 
     return () => {
@@ -68,8 +75,11 @@ export function ContextIndexView() {
   }, [preview, prompt]);
 
   useEffect(() => {
+    sourceFilterRef.current = sourceFilterKey;
+    requestIdRef.current += 1;
     setPreview(null);
     setPreviewError(null);
+    setPreviewLoading(false);
   }, [sourceFilterKey]);
 
   const coverageRows = useMemo(() => (status ? buildContextCoverageRows(status) : []), [status]);
@@ -91,15 +101,18 @@ export function ContextIndexView() {
 
   async function runReindex() {
     if (reindexing) return;
+    statusRequestIdRef.current += 1;
+    requestIdRef.current += 1;
     setReindexing(true);
     setReindexError(null);
     setStatusError(null);
+    setPreview(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
 
     try {
       const result = await reindexContextIndex();
       setStatus(result);
-      setPreview(null);
-      setPreviewError(null);
     } catch (error: unknown) {
       setReindexError(errorMessage(error, "Context index reindex failed."));
     } finally {
@@ -113,6 +126,7 @@ export function ContextIndexView() {
     if (!trimmedPrompt || previewLoading || !hasIndex) return;
 
     const requestId = requestIdRef.current + 1;
+    const sourceFilterSnapshot = sourceFilterRef.current;
     requestIdRef.current = requestId;
     setPreviewError(null);
     setPreview(null);
@@ -124,11 +138,15 @@ export function ContextIndexView() {
         limit: 5,
         ...(selectedSourceTypes.length > 0 ? { sourceTypes: selectedSourceTypes } : {})
       });
-      if (requestIdRef.current === requestId && promptRef.current.trim() === trimmedPrompt) {
+      if (
+        requestIdRef.current === requestId &&
+        promptRef.current.trim() === trimmedPrompt &&
+        sourceFilterRef.current === sourceFilterSnapshot
+      ) {
         setPreview({ prompt: trimmedPrompt, result });
       }
     } catch (error: unknown) {
-      if (requestIdRef.current === requestId) {
+      if (requestIdRef.current === requestId && sourceFilterRef.current === sourceFilterSnapshot) {
         setPreview(null);
         setPreviewError(errorMessage(error, "Context retrieval preview failed."));
       }
@@ -202,7 +220,11 @@ export function ContextIndexView() {
           </div>
         ) : (
           <div className="p-4 text-sm text-stone-500">
-            {statusLoading ? "Loading context index status..." : "No source context is indexed yet. Run reindex to scan this workdir."}
+            {statusError
+              ? "Context index status is unavailable. Check the error above, then retry status or reindex."
+              : statusLoading
+                ? "Loading context index status..."
+                : "No source context is indexed yet. Run reindex to scan this workdir."}
           </div>
         )}
       </section>

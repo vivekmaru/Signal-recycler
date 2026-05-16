@@ -1,5 +1,11 @@
 # Phase 5 Context Index Dashboard Wiring Follow-Up Backlog
 
+## Scope Anchor
+
+Phase 5 indexes repository and project context because indexing is core to the Signal Recycler vision. The relevant success criteria are that repo docs, agent instruction files, package files, and selected source chunks are indexed with path, line range, hash, and timestamp provenance; prompts can retrieve relevant docs/source chunks with measurable retrieval quality; source/doc chunks stay separate from durable memories; and optional QMD-backed indexing remains an evaluation path before building a custom full retrieval stack.
+
+Explicitly out of scope here: Phase 6 deterministic command-output compression, source/doc chunk injection into owned-session context envelopes, and Phase 7 JIT rehydration.
+
 ## P1: Promote Source Chunk Inspection From Row Summary To Detail Panel
 
 Beads: `idea-1-rzc`
