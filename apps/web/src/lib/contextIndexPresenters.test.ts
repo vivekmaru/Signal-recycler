@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ContextIndexStatus, ContextRetrievalResult } from "@signal-recycler/shared";
+import type { ContextChunk, ContextIndexStatus, ContextRetrievalResult } from "@signal-recycler/shared";
 import {
+  buildContextChunkDetail,
   buildContextCoverageRows,
   buildContextRetrievalPreview,
   contextIndexMetrics,
@@ -44,6 +45,20 @@ const retrieval = {
   }
 } satisfies ContextRetrievalResult;
 
+const chunkDetail = {
+  id: "ctx_1",
+  projectId: "demo",
+  sourceType: "source",
+  path: "apps/web/src/middleware.ts",
+  lineStart: 1,
+  lineEnd: 52,
+  hash: "hash_1234567890abcdef",
+  mtimeMs: 1778731200000,
+  sizeBytes: 2400,
+  text: "export function middleware() {\n  return true;\n}",
+  indexedAt: "2026-05-14T00:00:00.000Z"
+} satisfies ContextChunk;
+
 describe("context index presenters", () => {
   it("builds status metric tiles from index coverage", () => {
     expect(contextIndexMetrics(status)).toEqual([
@@ -82,6 +97,21 @@ describe("context index presenters", () => {
         }
       ],
       skippedRows: [{ id: "chunk_2", reason: "not_relevant" }]
+    });
+  });
+
+  it("builds chunk detail inspector fields from bounded context chunk content", () => {
+    expect(buildContextChunkDetail(chunkDetail)).toEqual({
+      id: "ctx_1",
+      title: "apps/web/src/middleware.ts",
+      sourceType: "Source",
+      location: "lines 1-52",
+      hash: "hash_1234567890abcdef",
+      shortHash: "hash_1234567",
+      indexedAt: "2026-05-14T00:00:00.000Z",
+      modifiedAt: "2026-05-14T04:00:00.000Z",
+      size: "2400 bytes",
+      text: "export function middleware() {\n  return true;\n}"
     });
   });
 

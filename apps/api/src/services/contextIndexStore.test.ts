@@ -106,6 +106,41 @@ describe("context index store", () => {
     expect(hits[0]?.rank).toBe(1);
   });
 
+  it("loads full chunk detail by id with project isolation", () => {
+    const store = createContextIndexStore(dbPath());
+    store.upsertChunks({
+      projectId: "demo",
+      workdir: "/repo",
+      chunks: [
+        chunk({
+          sourceType: "source",
+          path: "apps/web/src/middleware.ts",
+          hash: "hash_middleware_00000001",
+          text: "export function middleware() {\n  return true;\n}",
+          lineStart: 1,
+          lineEnd: 3,
+          indexedAt: "2026-05-14T00:02:00.000Z"
+        })
+      ]
+    });
+    const [record] = store.listChunkIds("demo");
+
+    const detail = store.getChunk("demo", record?.id ?? "");
+
+    expect(detail).toMatchObject({
+      id: record?.id,
+      projectId: "demo",
+      sourceType: "source",
+      path: "apps/web/src/middleware.ts",
+      lineStart: 1,
+      lineEnd: 3,
+      hash: "hash_middleware_00000001",
+      text: "export function middleware() {\n  return true;\n}",
+      indexedAt: "2026-05-14T00:02:00.000Z"
+    });
+    expect(store.getChunk("other", record?.id ?? "")).toBeNull();
+  });
+
   it("replaces a project index and removes stale chunks", () => {
     const store = createContextIndexStore(dbPath());
     store.upsertChunks({

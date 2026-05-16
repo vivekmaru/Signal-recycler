@@ -1,5 +1,6 @@
 import type {
   AgentAdapter,
+  ContextChunk,
   ContextIndexStatus,
   ContextRetrievalRequest,
   ContextRetrievalResult,
@@ -91,6 +92,10 @@ export async function retrieveContextIndex(input: ContextRetrievalRequest): Prom
     body: JSON.stringify(input)
   });
   return readJson(response);
+}
+
+export async function fetchContextChunk(chunkId: string): Promise<ContextChunk> {
+  return readJson(await fetch(`/api/context-index/chunks/${encodeURIComponent(chunkId)}`));
 }
 
 export async function createManualRule(input: {
