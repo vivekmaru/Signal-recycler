@@ -1,5 +1,8 @@
 import type {
   AgentAdapter,
+  ContextIndexStatus,
+  ContextRetrievalRequest,
+  ContextRetrievalResult,
   MemoryRecord,
   MemoryRetrievalResult,
   MemoryUsage,
@@ -34,6 +37,7 @@ export type MemoryAuditResult = {
 };
 
 export type MemoryRetrievalPreview = MemoryRetrievalResult;
+export type ContextRetrievalPreview = ContextRetrievalResult;
 
 export async function createSession(title?: string): Promise<SessionRecord> {
   const response = await fetch("/api/sessions", {
@@ -65,6 +69,23 @@ export async function previewMemoryRetrieval(input: {
   limit?: number;
 }): Promise<MemoryRetrievalPreview> {
   const response = await fetch("/api/memory/retrieve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return readJson(response);
+}
+
+export async function fetchContextIndexStatus(): Promise<ContextIndexStatus> {
+  return readJson(await fetch("/api/context-index/status"));
+}
+
+export async function reindexContextIndex(): Promise<ContextIndexStatus> {
+  return readJson(await fetch("/api/context-index/reindex", { method: "POST" }));
+}
+
+export async function retrieveContextIndex(input: ContextRetrievalRequest): Promise<ContextRetrievalPreview> {
+  const response = await fetch("/api/context-index/retrieve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
