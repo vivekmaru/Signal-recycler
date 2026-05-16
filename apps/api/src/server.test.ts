@@ -669,6 +669,76 @@ describe("api", () => {
     });
   });
 
+  it("does not require context index storage during app startup", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      },
+      contextIndexStoreFactory: () => {
+        throw new Error("no such module: fts5");
+      }
+    });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const status = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(health.statusCode).toBe(200);
+    expect(status.statusCode).toBe(503);
+    expect(status.json()).toMatchObject({
+      error: "Context index unavailable",
+      message: expect.stringContaining("fts5")
+    });
+  });
+
+  it("does not wipe an existing context index when reindex finds no readable files", async () => {
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-")),
+      "db.sqlite"
+    );
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    const missingWorkdirApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: join(databasePath, "missing-workdir"),
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const failedReindex = await missingWorkdirApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const preservedStatus = await missingWorkdirApp.inject({
+      method: "GET",
+      url: "/api/context-index/status"
+    });
+
+    expect(indexedChunks).toBeGreaterThan(0);
+    expect(failedReindex.statusCode).toBe(422);
+    expect(failedReindex.json()).toMatchObject({
+      error: "Context index scan produced no readable files"
+    });
+    expect(preservedStatus.json().totalChunks).toBe(indexedChunks);
+  });
+
   it("does not include other-project memories in retrieval previews", async () => {
     const store = createStore(":memory:");
     const current = store.approveRule(

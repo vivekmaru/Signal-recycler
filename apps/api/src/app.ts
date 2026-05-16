@@ -10,6 +10,7 @@ import {
 import { registerRuleRoutes } from "./routes/rules.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { type createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { type ContextIndexStore } from "./services/contextIndexStore.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -20,6 +21,7 @@ type AppOptions = {
   workingDirectory: string;
   databasePath?: string;
   contextIndexDbPath?: string;
+  contextIndexStoreFactory?: (path: string) => ContextIndexStore;
   upstreamBaseUrl?: string;
   agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
 };
@@ -87,7 +89,10 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   await registerContextIndexRoutes(app, {
     projectId,
     workingDirectory,
-    contextIndexDbPath: options.contextIndexDbPath ?? options.databasePath ?? ":memory:"
+    contextIndexDbPath: options.contextIndexDbPath ?? options.databasePath ?? ":memory:",
+    ...(options.contextIndexStoreFactory
+      ? { contextIndexStoreFactory: options.contextIndexStoreFactory }
+      : {})
   });
   await registerProxyRoutes(app, options);
 

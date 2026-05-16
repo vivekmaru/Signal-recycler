@@ -12,7 +12,9 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
   - Adds `GET /api/context-index/status`.
   - Adds `POST /api/context-index/reindex`.
   - Adds `POST /api/context-index/retrieve`.
-  - Owns a dedicated context-index store handle and closes it with the Fastify app.
+  - Lazily owns a dedicated context-index store handle and closes it with the Fastify app.
+  - Returns a route-level `503` when context-index storage is unavailable instead of failing app startup.
+  - Preserves an existing index when a reindex scan produces no readable/indexable files.
 - `apps/api/src/app.ts`
   - Registers context-index routes.
   - Adds `contextIndexDbPath` as an optional app option, defaulting to the app database path or in-memory storage.
@@ -23,6 +25,8 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
 
 - Confirm source/doc context chunks remain separate from durable memories.
 - Confirm context indexing remains explicit via `POST /api/context-index/reindex` and does not auto-scan on server start.
+- Confirm context-index store creation is lazy so missing FTS5 support does not break non-context-index API startup.
+- Confirm a failed or empty scan does not wipe previously indexed source context.
 - Confirm retrieval validates request shape and returns 400 for malformed prompts.
 - Confirm the route uses the existing scanner, store, and retrieval services rather than duplicating retrieval logic.
 - Confirm no UI, eval, vector retrieval, reranking, source injection, or QMD runtime dependency was added.
@@ -38,15 +42,16 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
 
 - `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts`
   - Red before implementation: context-index routes returned 404.
-  - Passed after implementation: 1 test file, 53 tests.
+  - Red during review hardening: lazy store and failed-scan preservation regressions failed.
+  - Passed after implementation: 1 test file, 55 tests.
 - `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts src/services/contextIndexStore.test.ts src/services/contextIndexScanner.test.ts src/services/contextIndexRetrieval.test.ts`
-  - Passed: 4 test files, 76 tests.
+  - Passed: 4 test files, 78 tests.
 - `pnpm --filter @signal-recycler/api type-check`
   - Passed.
 - `pnpm --filter @signal-recycler/shared type-check`
   - Passed.
 - `pnpm test`
-  - Passed: CLI 5 files / 32 tests, API 20 files / 168 tests, Web 7 files / 32 tests, Shared no tests with `--passWithNoTests`.
+  - Passed: CLI 5 files / 32 tests, API 20 files / 170 tests, Web 7 files / 32 tests, Shared no tests with `--passWithNoTests`.
 - `pnpm type-check`
   - Passed across shared, CLI, API, and web packages.
 - `pnpm build`

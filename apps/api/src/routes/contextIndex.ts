@@ -1,11 +1,15 @@
-import { type FastifyInstance } from "fastify";
+import { type FastifyInstance, type FastifyReply } from "fastify";
 import { contextRetrievalRequestSchema, type ContextChunk } from "@signal-recycler/shared";
-import { createContextIndexStore } from "../services/contextIndexStore.js";
+import {
+  createContextIndexStore,
+  type ContextIndexStore
+} from "../services/contextIndexStore.js";
 import { retrieveContextChunks } from "../services/contextIndexRetrieval.js";
 import { scanContextIndex } from "../services/contextIndexScanner.js";
 
 export type ContextIndexRouteOptions = {
   contextIndexDbPath: string;
+  contextIndexStoreFactory?: (path: string) => ContextIndexStore;
   projectId: string;
   workingDirectory: string;
 };
@@ -14,35 +18,50 @@ export async function registerContextIndexRoutes(
   app: FastifyInstance,
   options: ContextIndexRouteOptions
 ): Promise<void> {
-  const contextStore = createContextIndexStore(options.contextIndexDbPath);
+  const createStore = options.contextIndexStoreFactory ?? createContextIndexStore;
+  let contextStore: ContextIndexStore | null = null;
+  let contextStoreError: Error | null = null;
 
   app.addHook("onClose", async () => {
-    contextStore.close();
+    contextStore?.close();
   });
 
-  app.get("/api/context-index/status", async () =>
-    contextStore.status(options.projectId, options.workingDirectory)
-  );
+  app.get("/api/context-index/status", async (_request, reply) => {
+    const store = getContextStore();
+    if (!store.ok) return sendUnavailable(reply, store.error);
+    return store.value.status(options.projectId, options.workingDirectory);
+  });
 
-  app.post("/api/context-index/reindex", async () => {
+  app.post("/api/context-index/reindex", async (_request, reply) => {
+    const store = getContextStore();
+    if (!store.ok) return sendUnavailable(reply, store.error);
     const indexedAt = new Date().toISOString();
     const scanned = scanContextIndex({
       projectId: options.projectId,
       workdir: options.workingDirectory,
       indexedAt
     });
+    if (scanned.paths.length === 0) {
+      return reply.code(422).send({
+        error: "Context index scan produced no readable files",
+        message:
+          "No indexable files were read from the configured working directory, so the existing index was preserved."
+      });
+    }
 
-    contextStore.replaceProjectIndex({
+    store.value.replaceProjectIndex({
       projectId: options.projectId,
       workdir: options.workingDirectory,
       replacedPaths: scanned.paths,
       chunks: scanned.chunks.map(stripProjectId)
     });
 
-    return contextStore.status(options.projectId, options.workingDirectory);
+    return store.value.status(options.projectId, options.workingDirectory);
   });
 
   app.post("/api/context-index/retrieve", async (request, reply) => {
+    const store = getContextStore();
+    if (!store.ok) return sendUnavailable(reply, store.error);
     const parsed = contextRetrievalRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({
@@ -52,16 +71,35 @@ export async function registerContextIndexRoutes(
     }
 
     return retrieveContextChunks({
-      store: contextStore,
+      store: store.value,
       projectId: options.projectId,
       query: parsed.data.prompt,
       limit: parsed.data.limit,
       ...(parsed.data.sourceTypes ? { sourceTypes: parsed.data.sourceTypes } : {})
     });
   });
+
+  function getContextStore(): { ok: true; value: ContextIndexStore } | { ok: false; error: Error } {
+    if (contextStore) return { ok: true, value: contextStore };
+    if (contextStoreError) return { ok: false, error: contextStoreError };
+    try {
+      contextStore = createStore(options.contextIndexDbPath);
+      return { ok: true, value: contextStore };
+    } catch (error) {
+      contextStoreError = error as Error;
+      return { ok: false, error: contextStoreError };
+    }
+  }
 }
 
 function stripProjectId(chunk: Omit<ContextChunk, "id">): Omit<ContextChunk, "id" | "projectId"> {
   const { projectId: _projectId, ...rest } = chunk;
   return rest;
+}
+
+function sendUnavailable(reply: FastifyReply, error: Error) {
+  return reply.code(503).send({
+    error: "Context index unavailable",
+    message: error.message
+  });
 }
