@@ -646,6 +646,46 @@ describe("api", () => {
       sourceType: "source"
     });
     expect(retrieval.json().metrics.indexedChunks).toBe(reindex.json().totalChunks);
+
+    const chunkDetail = await app.inject({
+      method: "GET",
+      url: `/api/context-index/chunks/${retrieval.json().selected[0].chunkId}`
+    });
+
+    expect(chunkDetail.statusCode).toBe(200);
+    expect(chunkDetail.json()).toMatchObject({
+      id: retrieval.json().selected[0].chunkId,
+      projectId: TEST_APP_OPTIONS.projectId,
+      path: "apps/web/src/middleware.ts",
+      sourceType: "source",
+      lineStart: expect.any(Number),
+      lineEnd: expect.any(Number),
+      hash: retrieval.json().selected[0].hash,
+      indexedAt: expect.any(String),
+      text: expect.stringContaining("middleware")
+    });
+  });
+
+  it("returns 404 for missing context chunk detail requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/context-index/chunks/ctx_missing"
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({
+      error: "Context chunk not found",
+      message: expect.any(String)
+    });
   });
 
   it("returns 400 for malformed context retrieval requests", async () => {

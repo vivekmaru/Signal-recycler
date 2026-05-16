@@ -163,6 +163,19 @@ export function createContextIndexStore(path: string) {
       }));
     },
 
+    getChunk(projectId: string, chunkId: string): ContextChunk | null {
+      const row = db
+        .prepare(
+          `SELECT *
+           FROM context_chunks
+           WHERE project_id = ?
+             AND id = ?
+           LIMIT 1`
+        )
+        .get(projectId, chunkId) as Record<string, unknown> | undefined;
+      return row ? mapChunk(row) : null;
+    },
+
     listChunkIds(projectId: string, sourceTypes?: ContextSourceType[]): ChunkIdRecord[] {
       const normalizedSourceTypes = normalizeSourceTypes(sourceTypes);
       const sourceFilter =

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ContextIndexStatus, ContextSourceType } from "@signal-recycler/shared";
+import type { ContextChunk, ContextIndexStatus, ContextSourceType } from "@signal-recycler/shared";
 import type { ContextRetrievalPreview } from "../api";
-import { fetchContextIndexStatus, reindexContextIndex, retrieveContextIndex } from "../api";
+import { fetchContextChunk, fetchContextIndexStatus, reindexContextIndex, retrieveContextIndex } from "../api";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { Button } from "../components/Button";
 import {
+  buildContextChunkDetail,
   buildContextCoverageRows,
   buildContextRetrievalPreview,
   contextIndexMetrics,
@@ -36,8 +37,13 @@ export function ContextIndexView() {
   const [preview, setPreview] = useState<SubmittedPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
+  const [selectedChunk, setSelectedChunk] = useState<ContextChunk | null>(null);
+  const [chunkLoading, setChunkLoading] = useState(false);
+  const [chunkError, setChunkError] = useState<string | null>(null);
   const statusRequestIdRef = useRef(0);
   const requestIdRef = useRef(0);
+  const chunkRequestIdRef = useRef(0);
   const promptRef = useRef("");
   const sourceFilterKey = selectedSourceTypes.join(",");
   const sourceFilterRef = useRef(sourceFilterKey);
@@ -71,13 +77,13 @@ export function ContextIndexView() {
   useEffect(() => {
     setPreviewError(null);
     if (!preview) return;
-    if (prompt.trim() !== preview.prompt) setPreview(null);
+    if (prompt.trim() !== preview.prompt) clearPreview();
   }, [preview, prompt]);
 
   useEffect(() => {
     sourceFilterRef.current = sourceFilterKey;
     requestIdRef.current += 1;
-    setPreview(null);
+    clearPreview();
     setPreviewError(null);
     setPreviewLoading(false);
   }, [sourceFilterKey]);
@@ -85,6 +91,7 @@ export function ContextIndexView() {
   const coverageRows = useMemo(() => (status ? buildContextCoverageRows(status) : []), [status]);
   const metrics = useMemo(() => (status ? contextIndexMetrics(status) : []), [status]);
   const previewRows = useMemo(() => (preview ? buildContextRetrievalPreview(preview.result) : null), [preview]);
+  const chunkDetail = useMemo(() => (selectedChunk ? buildContextChunkDetail(selectedChunk) : null), [selectedChunk]);
   const hasPrompt = prompt.trim().length > 0;
   const hasIndex = (status?.totalChunks ?? 0) > 0;
 
@@ -106,7 +113,7 @@ export function ContextIndexView() {
     setReindexing(true);
     setReindexError(null);
     setStatusError(null);
-    setPreview(null);
+    clearPreview();
     setPreviewError(null);
     setPreviewLoading(false);
 
@@ -129,7 +136,7 @@ export function ContextIndexView() {
     const sourceFilterSnapshot = sourceFilterRef.current;
     requestIdRef.current = requestId;
     setPreviewError(null);
-    setPreview(null);
+    clearPreview();
     setPreviewLoading(true);
 
     try {
@@ -152,6 +159,41 @@ export function ContextIndexView() {
       }
     } finally {
       if (requestIdRef.current === requestId) setPreviewLoading(false);
+    }
+  }
+
+  function clearPreview() {
+    setPreview(null);
+    clearSelectedChunk();
+  }
+
+  function clearSelectedChunk() {
+    chunkRequestIdRef.current += 1;
+    setSelectedChunkId(null);
+    setSelectedChunk(null);
+    setChunkError(null);
+    setChunkLoading(false);
+  }
+
+  async function selectChunk(chunkId: string) {
+    if (chunkLoading && selectedChunkId === chunkId) return;
+    const requestId = chunkRequestIdRef.current + 1;
+    chunkRequestIdRef.current = requestId;
+    setSelectedChunkId(chunkId);
+    setSelectedChunk(null);
+    setChunkError(null);
+    setChunkLoading(true);
+
+    try {
+      const result = await fetchContextChunk(chunkId);
+      if (chunkRequestIdRef.current === requestId) setSelectedChunk(result);
+    } catch (error: unknown) {
+      if (chunkRequestIdRef.current === requestId) {
+        setSelectedChunk(null);
+        setChunkError(errorMessage(error, "Context chunk detail failed."));
+      }
+    } finally {
+      if (chunkRequestIdRef.current === requestId) setChunkLoading(false);
     }
   }
 
@@ -299,7 +341,17 @@ export function ContextIndexView() {
               <div className="overflow-x-auto rounded-md border border-stone-200">
                 <div className="min-w-[880px] divide-y divide-stone-100">
                   {previewRows.selectedRows.map((row) => (
-                    <div className="grid grid-cols-[64px_minmax(280px,1fr)_128px_96px] gap-4 p-3 text-sm" key={row.id}>
+                    <button
+                      aria-pressed={selectedChunkId === row.id}
+                      className={`grid grid-cols-[64px_minmax(280px,1fr)_128px_96px] gap-4 p-3 text-left text-sm transition ${
+                        selectedChunkId === row.id
+                          ? "bg-amber-50 ring-1 ring-inset ring-amber-300"
+                          : "bg-white hover:bg-stone-50"
+                      }`}
+                      key={row.id}
+                      onClick={() => void selectChunk(row.id)}
+                      type="button"
+                    >
                       <span className="font-mono text-stone-500">#{row.rank}</span>
                       <span className="min-w-0">
                         <span className="block truncate font-medium text-stone-950">{row.title}</span>
@@ -308,7 +360,7 @@ export function ContextIndexView() {
                       </span>
                       <span className="font-mono text-xs text-stone-500">{row.hash.slice(0, 12)}</span>
                       <span className="text-right font-mono text-sm text-stone-700">{row.score}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -317,6 +369,14 @@ export function ContextIndexView() {
                 No indexed chunks matched this prompt.
               </div>
             )}
+            {previewRows.selectedRows.length > 0 ? (
+              <ChunkInspector
+                detail={chunkDetail}
+                error={chunkError}
+                loading={chunkLoading}
+                selectedChunkId={selectedChunkId}
+              />
+            ) : null}
           </div>
         ) : (
           <div className="border-t border-stone-200 p-4 text-sm text-stone-500">
@@ -348,6 +408,79 @@ function MetricSkeleton({ label }: { label: string }) {
         <Badge>{label}</Badge>
       </div>
       <div className="font-mono text-sm text-stone-400">loading</div>
+    </div>
+  );
+}
+
+function ChunkInspector({
+  detail,
+  error,
+  loading,
+  selectedChunkId
+}: {
+  detail: ReturnType<typeof buildContextChunkDetail> | null;
+  error: string | null;
+  loading: boolean;
+  selectedChunkId: string | null;
+}) {
+  if (!selectedChunkId) {
+    return (
+      <div className="mt-4 rounded-md border border-dashed border-stone-300 bg-stone-50 p-4 text-sm text-stone-500">
+        Select a retrieved chunk to inspect its bounded content and provenance.
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="mt-4 rounded-md border border-stone-200 bg-stone-50 p-4 text-sm text-stone-500">
+        Loading chunk detail for <span className="font-mono text-stone-700">{selectedChunkId}</span>...
+      </div>
+    );
+  }
+
+  if (error) {
+    return <ErrorBox message={error} title="Chunk detail failed" />;
+  }
+
+  if (!detail) return null;
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-md border border-stone-200 bg-white">
+      <div className="border-b border-stone-200 bg-stone-50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Badge tone="blue">Chunk detail</Badge>
+            <h3 className="mt-2 truncate text-sm font-semibold text-stone-950">{detail.title}</h3>
+            <p className="mt-1 text-xs text-stone-500">
+              {detail.sourceType} · {detail.location}
+            </p>
+          </div>
+          <div className="rounded-md border border-stone-200 bg-white px-2 py-1 font-mono text-xs text-stone-600">
+            {detail.shortHash}
+          </div>
+        </div>
+      </div>
+      <dl className="grid gap-3 border-b border-stone-200 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <InspectorField label="Indexed" value={detail.indexedAt} />
+        <InspectorField label="Modified" value={detail.modifiedAt} />
+        <InspectorField label="Size" value={detail.size} />
+        <InspectorField label="Full hash" value={detail.hash} />
+      </dl>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words bg-stone-950 p-4 font-mono text-xs leading-6 text-stone-100">
+        {detail.text}
+      </pre>
+    </div>
+  );
+}
+
+function InspectorField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-semibold uppercase tracking-wide text-stone-500">{label}</dt>
+      <dd className="mt-1 truncate font-mono text-stone-700" title={value}>
+        {value}
+      </dd>
     </div>
   );
 }

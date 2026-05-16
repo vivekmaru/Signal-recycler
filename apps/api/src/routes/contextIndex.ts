@@ -79,6 +79,28 @@ export async function registerContextIndexRoutes(
     });
   });
 
+  app.get("/api/context-index/chunks/:chunkId", async (request, reply) => {
+    const store = getContextStore();
+    if (!store.ok) return sendUnavailable(reply, store.error);
+    const { chunkId } = request.params as { chunkId?: string };
+    if (!chunkId) {
+      return reply.code(400).send({
+        error: "Invalid context chunk request",
+        message: "chunkId is required"
+      });
+    }
+
+    const chunk = store.value.getChunk(options.projectId, chunkId);
+    if (!chunk) {
+      return reply.code(404).send({
+        error: "Context chunk not found",
+        message: "No indexed context chunk matched this id for the current project."
+      });
+    }
+
+    return chunk;
+  });
+
   function getContextStore(): { ok: true; value: ContextIndexStore } | { ok: false; error: Error } {
     if (contextStore) return { ok: true, value: contextStore };
     try {

@@ -1,4 +1,5 @@
 import type {
+  ContextChunk,
   ContextIndexStatus,
   ContextRetrievalResult,
   ContextSourceType
@@ -39,6 +40,19 @@ export type ContextRetrievalPreviewRows = {
   metrics: ContextIndexMetric[];
   selectedRows: SelectedContextPreviewRow[];
   skippedRows: SkippedContextPreviewRow[];
+};
+
+export type ContextChunkDetail = {
+  id: string;
+  title: string;
+  sourceType: string;
+  location: string;
+  hash: string;
+  shortHash: string;
+  indexedAt: string;
+  modifiedAt: string;
+  size: string;
+  text: string;
 };
 
 export function contextIndexMetrics(status: ContextIndexStatus): ContextIndexMetric[] {
@@ -85,6 +99,21 @@ export function buildContextRetrievalPreview(result: ContextRetrievalResult): Co
       id: chunk.chunkId,
       reason: chunk.reason
     }))
+  };
+}
+
+export function buildContextChunkDetail(chunk: ContextChunk): ContextChunkDetail {
+  return {
+    id: chunk.id,
+    title: chunk.path,
+    sourceType: sourceTypeLabel(chunk.sourceType),
+    location: `lines ${chunk.lineStart}-${chunk.lineEnd}`,
+    hash: chunk.hash,
+    shortHash: chunk.hash.slice(0, 12),
+    indexedAt: chunk.indexedAt,
+    modifiedAt: new Date(chunk.mtimeMs).toISOString(),
+    size: `${chunk.sizeBytes} bytes`,
+    text: chunk.text
   };
 }
 
