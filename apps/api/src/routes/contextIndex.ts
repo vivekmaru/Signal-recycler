@@ -20,7 +20,6 @@ export async function registerContextIndexRoutes(
 ): Promise<void> {
   const createStore = options.contextIndexStoreFactory ?? createContextIndexStore;
   let contextStore: ContextIndexStore | null = null;
-  let contextStoreError: Error | null = null;
 
   app.addHook("onClose", async () => {
     contextStore?.close();
@@ -41,11 +40,12 @@ export async function registerContextIndexRoutes(
       workdir: options.workingDirectory,
       indexedAt
     });
-    if (scanned.paths.length === 0) {
+    if (scanned.errors.length > 0) {
       return reply.code(422).send({
-        error: "Context index scan produced no readable files",
+        error: "Context index scan failed",
         message:
-          "No indexable files were read from the configured working directory, so the existing index was preserved."
+          "One or more files or directories could not be read, so the existing index was preserved.",
+        errors: scanned.errors
       });
     }
 
@@ -81,13 +81,11 @@ export async function registerContextIndexRoutes(
 
   function getContextStore(): { ok: true; value: ContextIndexStore } | { ok: false; error: Error } {
     if (contextStore) return { ok: true, value: contextStore };
-    if (contextStoreError) return { ok: false, error: contextStoreError };
     try {
       contextStore = createStore(options.contextIndexDbPath);
       return { ok: true, value: contextStore };
     } catch (error) {
-      contextStoreError = error as Error;
-      return { ok: false, error: contextStoreError };
+      return { ok: false, error: error as Error };
     }
   }
 }
