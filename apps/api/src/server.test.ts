@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
@@ -15,6 +15,7 @@ const TEST_APP_OPTIONS = {
   projectId: "test-project",
   workingDirectory: "/tmp/test-project"
 } as const;
+const fixtureContextRepoPath = resolve(process.cwd(), "../../fixtures/context-index-repo");
 
 afterEach(() => {
   vi.useRealTimers();
@@ -591,6 +592,79 @@ describe("api", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
       error: "Invalid memory retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("reindexes repository context and retrieves source chunks", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const emptyStatus = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(emptyStatus.statusCode).toBe(200);
+    expect(emptyStatus.json()).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: fixtureContextRepoPath,
+      totalChunks: 0,
+      totalFiles: 0,
+      lastIndexedAt: null,
+      bySourceType: []
+    });
+
+    const reindex = await app.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+
+    expect(reindex.statusCode).toBe(200);
+    expect(reindex.json()).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: fixtureContextRepoPath,
+      totalChunks: expect.any(Number),
+      totalFiles: expect.any(Number),
+      lastIndexedAt: expect.any(String)
+    });
+    expect(reindex.json().totalChunks).toBeGreaterThan(0);
+
+    const retrieval = await app.inject({
+      method: "POST",
+      url: "/api/context-index/retrieve",
+      payload: { prompt: "where is auth middleware", limit: 5, sourceTypes: ["source"] }
+    });
+
+    expect(retrieval.statusCode).toBe(200);
+    expect(retrieval.json().selected[0]).toMatchObject({
+      path: "apps/web/src/middleware.ts",
+      sourceType: "source"
+    });
+    expect(retrieval.json().metrics.indexedChunks).toBe(reindex.json().totalChunks);
+  });
+
+  it("returns 400 for malformed context retrieval requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/context-index/retrieve",
+      payload: { prompt: "", limit: 5 }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid context retrieval request",
       message: expect.any(String)
     });
   });
