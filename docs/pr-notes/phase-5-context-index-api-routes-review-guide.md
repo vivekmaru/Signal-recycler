@@ -14,13 +14,18 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
   - Adds `POST /api/context-index/retrieve`.
   - Lazily owns a dedicated context-index store handle and closes it with the Fastify app.
   - Returns a route-level `503` when context-index storage is unavailable instead of failing app startup, and retries store initialization on later requests.
+  - Normalizes unknown store initialization failures before returning unavailable responses.
   - Preserves an existing index when a reindex scan has file or directory read errors.
   - Allows a clean empty workdir scan to clear the project index.
+- `apps/api/src/services/contextIndexStore.ts`
+  - Closes the SQLite handle if schema setup fails during store creation.
 - `apps/api/src/app.ts`
   - Registers context-index routes.
   - Adds `contextIndexDbPath` as an optional app option, defaulting to the app database path or in-memory storage.
 - `apps/api/src/server.test.ts`
-  - Covers empty status, explicit reindex, source-filtered retrieval, malformed retrieval requests, store retry, valid empty workdirs, and partial scan failure preservation.
+  - Covers empty status, explicit reindex, source-filtered retrieval, malformed retrieval requests, store retry, non-Error initialization failures, valid empty workdirs, and partial scan failure preservation.
+- `apps/api/src/services/contextIndexStore.lifecycle.test.ts`
+  - Covers failed schema setup cleanup for the SQLite handle.
 - `apps/api/src/services/contextIndexScanner.ts`
   - Reports scanner read errors separately from clean skips such as large, binary, excluded, or non-indexable files.
 
@@ -30,6 +35,8 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
 - Confirm context indexing remains explicit via `POST /api/context-index/reindex` and does not auto-scan on server start.
 - Confirm context-index store creation is lazy so missing FTS5 support does not break non-context-index API startup.
 - Confirm transient context-index store creation failures can recover on a later request.
+- Confirm failed store initialization returns useful unavailable responses even if the thrown value is not an `Error`.
+- Confirm failed schema setup closes the opened SQLite handle before retrying later.
 - Confirm a failed scan does not wipe previously indexed source context.
 - Confirm a valid empty workdir scan clears the project index.
 - Confirm scanner error reporting distinguishes unreadable files/directories from clean skipped files.
@@ -49,9 +56,13 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
 - `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts`
   - Red before implementation: context-index routes returned 404.
   - Red during review hardening: lazy store and failed-scan preservation regressions failed.
-  - Passed after latest review hardening: 1 test file, 57 tests.
+  - Passed after latest store-initialization hardening: 1 test file, 58 tests.
+- `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts src/services/contextIndexStore.lifecycle.test.ts src/services/contextIndexStore.test.ts`
+  - Passed after latest store-initialization hardening: 3 test files, 68 tests.
 - `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts src/services/contextIndexScanner.test.ts`
   - Passed after latest review hardening: 2 test files, 69 tests.
+- `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts src/services/contextIndexStore.lifecycle.test.ts src/services/contextIndexStore.test.ts src/services/contextIndexScanner.test.ts src/services/contextIndexRetrieval.test.ts`
+  - Passed after latest store-initialization hardening: 5 test files, 84 tests.
 - `pnpm --filter @signal-recycler/api exec vitest run src/server.test.ts src/services/contextIndexStore.test.ts src/services/contextIndexScanner.test.ts src/services/contextIndexRetrieval.test.ts`
   - Passed after latest review hardening: 4 test files, 81 tests.
 - `pnpm --filter @signal-recycler/api type-check`
@@ -59,7 +70,7 @@ It does not update the dashboard, add eval suites, or inject source chunks into 
 - `pnpm --filter @signal-recycler/shared type-check`
   - Passed.
 - `pnpm test`
-  - Passed: CLI 5 files / 32 tests, API 20 files / 173 tests, Web 7 files / 32 tests, Shared no tests with `--passWithNoTests`.
+  - Passed: CLI 5 files / 32 tests, API 21 files / 176 tests, Web 7 files / 32 tests, Shared no tests with `--passWithNoTests`.
 - `pnpm type-check`
   - Passed across shared, CLI, API, and web packages.
 - `pnpm build`

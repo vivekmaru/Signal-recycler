@@ -699,6 +699,27 @@ describe("api", () => {
     expect(attempts).toBe(2);
   });
 
+  it("normalizes non-error context index storage initialization failures", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      },
+      contextIndexStoreFactory: () => {
+        throw "raw context index failure";
+      }
+    });
+
+    const status = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(status.statusCode).toBe(503);
+    expect(status.json()).toMatchObject({
+      error: "Context index unavailable",
+      message: "raw context index failure"
+    });
+  });
+
   it("does not wipe an existing context index when reindex scan fails", async () => {
     const databasePath = join(
       mkdtempSync(join(tmpdir(), "signal-recycler-context-api-")),

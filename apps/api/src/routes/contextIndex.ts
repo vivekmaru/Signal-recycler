@@ -85,7 +85,7 @@ export async function registerContextIndexRoutes(
       contextStore = createStore(options.contextIndexDbPath);
       return { ok: true, value: contextStore };
     } catch (error) {
-      return { ok: false, error: error as Error };
+      return { ok: false, error: normalizeError(error) };
     }
   }
 }
@@ -100,4 +100,10 @@ function sendUnavailable(reply: FastifyReply, error: Error) {
     error: "Context index unavailable",
     message: error.message
   });
+}
+
+function normalizeError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === "string") return new Error(error);
+  return new Error("Unknown error");
 }
