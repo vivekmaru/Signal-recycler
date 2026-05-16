@@ -1,12 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
 import { renderPlaybookBlock } from "./playbook.js";
 import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { createContextIndexStore } from "./services/contextIndexStore.js";
 import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
@@ -15,6 +16,7 @@ const TEST_APP_OPTIONS = {
   projectId: "test-project",
   workingDirectory: "/tmp/test-project"
 } as const;
+const fixtureContextRepoPath = resolve(process.cwd(), "../../fixtures/context-index-repo");
 
 afterEach(() => {
   vi.useRealTimers();
@@ -593,6 +595,295 @@ describe("api", () => {
       error: "Invalid memory retrieval request",
       message: expect.any(String)
     });
+  });
+
+  it("reindexes repository context and retrieves source chunks", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const emptyStatus = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(emptyStatus.statusCode).toBe(200);
+    expect(emptyStatus.json()).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: fixtureContextRepoPath,
+      totalChunks: 0,
+      totalFiles: 0,
+      lastIndexedAt: null,
+      bySourceType: []
+    });
+
+    const reindex = await app.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+
+    expect(reindex.statusCode).toBe(200);
+    expect(reindex.json()).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: fixtureContextRepoPath,
+      totalChunks: expect.any(Number),
+      totalFiles: expect.any(Number),
+      lastIndexedAt: expect.any(String)
+    });
+    expect(reindex.json().totalChunks).toBeGreaterThan(0);
+
+    const retrieval = await app.inject({
+      method: "POST",
+      url: "/api/context-index/retrieve",
+      payload: { prompt: "where is auth middleware", limit: 5, sourceTypes: ["source"] }
+    });
+
+    expect(retrieval.statusCode).toBe(200);
+    expect(retrieval.json().selected[0]).toMatchObject({
+      path: "apps/web/src/middleware.ts",
+      sourceType: "source"
+    });
+    expect(retrieval.json().metrics.indexedChunks).toBe(reindex.json().totalChunks);
+  });
+
+  it("returns 400 for malformed context retrieval requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/context-index/retrieve",
+      payload: { prompt: "", limit: 5 }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid context retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("does not require context index storage during app startup", async () => {
+    let attempts = 0;
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      },
+      contextIndexStoreFactory: (path) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("no such module: fts5");
+        return createContextIndexStore(path);
+      }
+    });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const status = await app.inject({ method: "GET", url: "/api/context-index/status" });
+    const recoveredStatus = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(health.statusCode).toBe(200);
+    expect(status.statusCode).toBe(503);
+    expect(status.json()).toMatchObject({
+      error: "Context index unavailable",
+      message: expect.stringContaining("fts5")
+    });
+    expect(recoveredStatus.statusCode).toBe(200);
+    expect(attempts).toBe(2);
+  });
+
+  it("normalizes non-error context index storage initialization failures", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      },
+      contextIndexStoreFactory: () => {
+        throw "raw context index failure";
+      }
+    });
+
+    const status = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(status.statusCode).toBe(503);
+    expect(status.json()).toMatchObject({
+      error: "Context index unavailable",
+      message: "raw context index failure"
+    });
+  });
+
+  it("does not wipe an existing context index when reindex scan fails", async () => {
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-")),
+      "db.sqlite"
+    );
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    const missingWorkdirApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: join(databasePath, "missing-workdir"),
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const failedReindex = await missingWorkdirApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const preservedStatus = await missingWorkdirApp.inject({
+      method: "GET",
+      url: "/api/context-index/status"
+    });
+
+    expect(indexedChunks).toBeGreaterThan(0);
+    expect(failedReindex.statusCode).toBe(422);
+    expect(failedReindex.json()).toMatchObject({
+      error: "Context index scan failed",
+      errors: [
+        expect.objectContaining({
+          path: ".",
+          reason: "read_directory_failed"
+        })
+      ]
+    });
+    expect(preservedStatus.json().totalChunks).toBe(indexedChunks);
+  });
+
+  it("clears an existing context index for a valid empty workdir", async () => {
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-empty-")),
+      "db.sqlite"
+    );
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    const emptyWorkdir = mkdtempSync(join(tmpdir(), "signal-recycler-context-empty-workdir-"));
+    const emptyApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: emptyWorkdir,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const reindex = await emptyApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const status = await emptyApp.inject({
+      method: "GET",
+      url: "/api/context-index/status"
+    });
+
+    expect(indexedChunks).toBeGreaterThan(0);
+    expect(reindex.statusCode).toBe(200);
+    expect(status.json().totalChunks).toBe(0);
+    expect(status.json().totalFiles).toBe(0);
+  });
+
+  it("does not replace an existing context index when reindex partially skips unreadable files", async () => {
+    if (process.platform === "win32") return;
+
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-partial-")),
+      "db.sqlite"
+    );
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-context-partial-workdir-"));
+    const privateDir = join(workdir, "private");
+    writeFileSync(join(workdir, "README.md"), "indexed docs\n");
+    mkdirSync(privateDir);
+    writeFileSync(join(privateDir, "hidden.ts"), "export const hidden = true;\n");
+
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: workdir,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    chmodSync(privateDir, 0);
+    try {
+      const partialApp = await createApp({
+        ...TEST_APP_OPTIONS,
+        workingDirectory: workdir,
+        databasePath,
+        store: createStore(":memory:"),
+        codexRunner: {
+          run: async () => ({ finalResponse: "ok", items: [] })
+        }
+      });
+      const failedReindex = await partialApp.inject({
+        method: "POST",
+        url: "/api/context-index/reindex"
+      });
+      const preservedStatus = await partialApp.inject({
+        method: "GET",
+        url: "/api/context-index/status"
+      });
+
+      expect(indexedChunks).toBeGreaterThan(1);
+      expect(failedReindex.statusCode).toBe(422);
+      expect(failedReindex.json()).toMatchObject({
+        error: "Context index scan failed",
+        errors: [
+          expect.objectContaining({
+            path: "private",
+            reason: "read_directory_failed"
+          })
+        ]
+      });
+      expect(preservedStatus.json().totalChunks).toBe(indexedChunks);
+      await partialApp.close();
+    } finally {
+      chmodSync(privateDir, 0o700);
+    }
   });
 
   it("does not include other-project memories in retrieval previews", async () => {

@@ -4,6 +4,11 @@ import { extname, join, relative, sep } from "node:path";
 import { type ContextChunk, type ContextSourceType } from "@signal-recycler/shared";
 
 export type ContextIndexChunk = Omit<ContextChunk, "id">;
+export type ContextIndexScanError = {
+  path: string;
+  reason: "read_directory_failed" | "read_file_failed";
+  message: string;
+};
 
 type ScanContextIndexInput = {
   projectId: string;
@@ -62,17 +67,30 @@ const CONFIG_BASENAMES = new Set([
 export function scanContextIndex(input: ScanContextIndexInput): {
   chunks: ContextIndexChunk[];
   paths: string[];
+  errors: ContextIndexScanError[];
 } {
   const chunks: ContextIndexChunk[] = [];
   const paths: string[] = [];
+  const errors: ContextIndexScanError[] = [];
   const maxFileBytes = input.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  const walked = walkFiles(input.workdir, input.workdir);
+  errors.push(...walked.errors);
 
-  for (const absolutePath of walkFiles(input.workdir)) {
+  for (const absolutePath of walked.files) {
     const path = normalizePath(relative(input.workdir, absolutePath));
     if (!shouldIndexPath(path)) continue;
 
     const file = readIndexableFile(absolutePath, maxFileBytes);
-    if (!file) continue;
+    if (file.status === "skip") continue;
+    if (file.status === "error") {
+      errors.push({
+        path,
+        reason: "read_file_failed",
+        message: file.message
+      });
+      continue;
+    }
+
     paths.push(path);
     chunks.push(
       ...chunkFile({
@@ -87,18 +105,31 @@ export function scanContextIndex(input: ScanContextIndexInput): {
     );
   }
 
-  return { chunks, paths };
+  return { chunks, paths, errors };
 }
 
-function walkFiles(root: string): string[] {
+function walkFiles(
+  root: string,
+  base: string
+): { files: string[]; errors: ContextIndexScanError[] } {
   const files: string[] = [];
+  const errors: ContextIndexScanError[] = [];
   let entries;
   try {
     entries = readdirSync(root, { withFileTypes: true }).sort((left, right) =>
       left.name.localeCompare(right.name)
     );
-  } catch {
-    return files;
+  } catch (error) {
+    return {
+      files,
+      errors: [
+        {
+          path: normalizePath(relative(base, root)) || ".",
+          reason: "read_directory_failed",
+          message: errorMessage(error)
+        }
+      ]
+    };
   }
 
   for (const entry of entries) {
@@ -106,31 +137,37 @@ function walkFiles(root: string): string[] {
 
     const absolutePath = join(root, entry.name);
     if (entry.isDirectory()) {
-      files.push(...walkFiles(absolutePath));
+      const walked = walkFiles(absolutePath, base);
+      files.push(...walked.files);
+      errors.push(...walked.errors);
     } else if (entry.isFile()) {
       files.push(absolutePath);
     }
   }
 
-  return files;
+  return { files, errors };
 }
 
 function readIndexableFile(
   absolutePath: string,
   maxFileBytes: number
-): { text: string; mtimeMs: number; sizeBytes: number } | null {
+):
+  | { status: "ok"; text: string; mtimeMs: number; sizeBytes: number }
+  | { status: "skip" }
+  | { status: "error"; message: string } {
   try {
     const stats = statSync(absolutePath);
-    if (stats.size > maxFileBytes) return null;
+    if (stats.size > maxFileBytes) return { status: "skip" };
     const bytes = readFileSync(absolutePath);
-    if (looksBinary(bytes)) return null;
+    if (looksBinary(bytes)) return { status: "skip" };
     return {
+      status: "ok",
       text: bytes.toString("utf8"),
       mtimeMs: stats.mtimeMs,
       sizeBytes: stats.size
     };
-  } catch {
-    return null;
+  } catch (error) {
+    return { status: "error", message: errorMessage(error) };
   }
 }
 
@@ -214,4 +251,8 @@ function basename(path: string): string {
 
 function normalizePath(value: string): string {
   return value.split(sep).join("/");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

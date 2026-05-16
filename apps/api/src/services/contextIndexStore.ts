@@ -39,7 +39,16 @@ export type ContextIndexStore = ReturnType<typeof createContextIndexStore>;
 
 export function createContextIndexStore(path: string) {
   const db = new DatabaseSync(path);
-  ensureSchema(db);
+  try {
+    ensureSchema(db);
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      // Preserve the original schema/setup failure as the caller-facing error.
+    }
+    throw error;
+  }
 
   return {
     upsertChunks(input: UpsertChunksInput): void {

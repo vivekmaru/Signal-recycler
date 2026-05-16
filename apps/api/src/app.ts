@@ -1,6 +1,7 @@
 import path from "node:path";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
+import { registerContextIndexRoutes } from "./routes/contextIndex.js";
 import { registerDemoRoutes } from "./routes/demo.js";
 import {
   registerProxyRoutes,
@@ -9,6 +10,7 @@ import {
 import { registerRuleRoutes } from "./routes/rules.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { type createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { type ContextIndexStore } from "./services/contextIndexStore.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -18,6 +20,8 @@ type AppOptions = {
   projectId: string;
   workingDirectory: string;
   databasePath?: string;
+  contextIndexDbPath?: string;
+  contextIndexStoreFactory?: (path: string) => ContextIndexStore;
   upstreamBaseUrl?: string;
   agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
 };
@@ -82,6 +86,14 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   await registerSessionRoutes(app, options);
   await registerDemoRoutes(app, options);
   await registerRuleRoutes(app, options);
+  await registerContextIndexRoutes(app, {
+    projectId,
+    workingDirectory,
+    contextIndexDbPath: options.contextIndexDbPath ?? options.databasePath ?? ":memory:",
+    ...(options.contextIndexStoreFactory
+      ? { contextIndexStoreFactory: options.contextIndexStoreFactory }
+      : {})
+  });
   await registerProxyRoutes(app, options);
 
   return app;

@@ -69,6 +69,7 @@ describe("context index scanner", () => {
     });
 
     expect(result.chunks.map((chunk) => chunk.path)).toEqual(["README.md"]);
+    expect(result.errors).toEqual([]);
   });
 
   it("records stable hashes, line ranges, file metadata, and slash-normalized paths", () => {
@@ -227,6 +228,12 @@ describe("context index scanner", () => {
       });
 
       expect(result.chunks.map((chunk) => chunk.path)).toEqual(["safe.ts"]);
+      expect(result.errors).toEqual([
+        expect.objectContaining({
+          path: "unreadable.ts",
+          reason: "read_file_failed"
+        })
+      ]);
     } finally {
       chmodSync(unreadablePath, 0o600);
     }
@@ -250,8 +257,33 @@ describe("context index scanner", () => {
       });
 
       expect(result.chunks.map((chunk) => chunk.path)).toEqual(["README.md"]);
+      expect(result.errors).toEqual([
+        expect.objectContaining({
+          path: "private",
+          reason: "read_directory_failed"
+        })
+      ]);
     } finally {
       chmodSync(unreadablePath, 0o700);
     }
+  });
+
+  it("reports a missing workdir as a directory read error", () => {
+    const workdir = join(tmpdir(), `signal-recycler-missing-scan-${Date.now()}`);
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.chunks).toEqual([]);
+    expect(result.paths).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        path: ".",
+        reason: "read_directory_failed"
+      })
+    ]);
   });
 });
