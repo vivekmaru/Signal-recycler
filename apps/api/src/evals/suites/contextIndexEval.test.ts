@@ -10,7 +10,18 @@ import { runContextIndexEval } from "./contextIndexEval.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  for (const tempRoot of tempRoots.splice(0)) {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
+
+const tempRoots: string[] = [];
+
+function makeTempRoot(prefix: string): string {
+  const tempRoot = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(tempRoot);
+  return tempRoot;
+}
 
 describe("context index eval", () => {
   it("measures source/doc retrieval recall, precision, and efficiency offline", () => {
@@ -62,8 +73,8 @@ describe("context index eval", () => {
   });
 
   it("deduplicates multiple selected chunks from the same path before scoring", () => {
-    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-dupe-"));
-    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-temp-root-"));
+    const workdir = makeTempRoot("signal-recycler-context-index-eval-dupe-");
+    const tempRoot = makeTempRoot("signal-recycler-context-index-eval-temp-root-");
     const sourceDir = join(workdir, "apps/web/src");
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(
@@ -84,7 +95,7 @@ describe("context index eval", () => {
           title: "Duplicate path selections score once",
           query: "authentication middleware unauthorized response",
           goldPaths: ["apps/web/src/middleware.ts"],
-          limit: 3,
+          limit: 3.7,
           sourceTypes: ["source"]
         }
       ],
@@ -115,11 +126,39 @@ describe("context index eval", () => {
     expect(readdirSync(tempRoot)).toHaveLength(0);
   });
 
-  it("reports temp store setup failures as suite failures", () => {
-    const missingTempRoot = join(
-      mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-missing-parent-")),
-      "missing"
+  it("labels metrics with the default effective limit for non-positive limits", () => {
+    const result = runContextIndexEval({
+      cases: [
+        {
+          id: "context-index.default-effective-limit",
+          title: "Default effective limit is reported",
+          query: "package scripts test type-check",
+          goldPaths: ["package.json"],
+          limit: 0,
+          sourceTypes: ["package"]
+        }
+      ]
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.cases[0]).toMatchObject({
+      id: "context-index.default-effective-limit",
+      summary: "recall@8=1, precision@8=1"
+    });
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_recall_at_8", value: 1 }),
+        expect.objectContaining({ name: "context_index_precision_at_8", value: 1 })
+      ])
     );
+    expect(result.metrics).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "context_index_recall_at_0" })])
+    );
+  });
+
+  it("reports temp store setup failures as suite failures", () => {
+    const tempRootParent = makeTempRoot("signal-recycler-context-index-eval-missing-parent-");
+    const missingTempRoot = join(tempRootParent, "missing");
 
     const result = runContextIndexEval({ tempRoot: missingTempRoot });
 
@@ -137,7 +176,7 @@ describe("context index eval", () => {
   });
 
   it("keeps setup cleanup failures contained in the suite result", () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-setup-root-"));
+    const tempRoot = makeTempRoot("signal-recycler-context-index-eval-setup-root-");
 
     const result = runContextIndexEval({
       tempRoot,
@@ -166,11 +205,10 @@ describe("context index eval", () => {
         expect.objectContaining({ name: "context_index_cleanup_errors", value: 1, unit: "errors" })
       ])
     );
-    rmSync(tempRoot, { recursive: true, force: true });
   });
 
   it("reports index write failures as suite failures", () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-write-root-"));
+    const tempRoot = makeTempRoot("signal-recycler-context-index-eval-write-root-");
     let closed = false;
 
     const result = runContextIndexEval({
@@ -204,7 +242,7 @@ describe("context index eval", () => {
   });
 
   it("reports close failures as suite failures after successful eval execution", () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-close-root-"));
+    const tempRoot = makeTempRoot("signal-recycler-context-index-eval-close-root-");
 
     const result = runContextIndexEval({
       tempRoot,
@@ -236,9 +274,7 @@ describe("context index eval", () => {
   });
 
   it("reports cleanup failures as suite failures after successful eval execution", () => {
-    const tempRoot = mkdtempSync(
-      join(tmpdir(), "signal-recycler-context-index-eval-cleanup-root-")
-    );
+    const tempRoot = makeTempRoot("signal-recycler-context-index-eval-cleanup-root-");
 
     const result = runContextIndexEval({
       tempRoot,
@@ -259,6 +295,5 @@ describe("context index eval", () => {
         expect.objectContaining({ name: "context_index_cleanup_errors", value: 1, unit: "errors" })
       ])
     );
-    rmSync(tempRoot, { recursive: true, force: true });
   });
 });

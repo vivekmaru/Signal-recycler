@@ -138,7 +138,7 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
         0
       );
       const cases = activeCases.map((testCase) => scoreCase(testCase, store));
-      const limitMetrics = Array.from(new Set(activeCases.map((testCase) => testCase.limit)))
+      const limitMetrics = Array.from(new Set(cases.flatMap(effectiveMetricLimits)))
         .sort((left, right) => left - right)
         .flatMap((limit) => [
           metric(recallMetricName(limit), averageMetric(cases, recallMetricName(limit)), "ratio"),
@@ -252,6 +252,7 @@ function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCas
     ...(testCase.sourceTypes ? { sourceTypes: testCase.sourceTypes } : {})
   });
   const selectedPaths = Array.from(new Set(retrieval.selected.map((decision) => decision.path)));
+  const effectiveLimit = retrieval.metrics.limit;
   const gold = new Set(testCase.goldPaths);
   const truePositiveCount = selectedPaths.filter((path) => gold.has(path)).length;
   const recall =
@@ -276,10 +277,10 @@ function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCas
     id: testCase.id,
     title: testCase.title,
     status: passed ? "pass" : "fail",
-    summary: `recall@${testCase.limit}=${round(recall)}, precision@${testCase.limit}=${round(precision)}`,
+    summary: `recall@${effectiveLimit}=${round(recall)}, precision@${effectiveLimit}=${round(precision)}`,
     metrics: [
-      metric(recallMetricName(testCase.limit), round(recall), "ratio"),
-      metric(precisionMetricName(testCase.limit), round(precision), "ratio"),
+      metric(recallMetricName(effectiveLimit), round(recall), "ratio"),
+      metric(precisionMetricName(effectiveLimit), round(precision), "ratio"),
       metric("context_index_selected_tokens", selectedTokens, "tokens")
     ],
     details: {
@@ -289,6 +290,13 @@ function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCas
       selected: retrieval.selected
     }
   };
+}
+
+function effectiveMetricLimits(testCase: EvalCaseResult): number[] {
+  return (testCase.metrics ?? [])
+    .map((item) => item.name.match(/^context_index_(?:recall|precision)_at_(\d+)$/)?.[1])
+    .filter((limit): limit is string => Boolean(limit))
+    .map((limit) => Number(limit));
 }
 
 function recallMetricName(limit: number): string {
