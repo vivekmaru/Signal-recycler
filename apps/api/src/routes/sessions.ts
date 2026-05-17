@@ -2,6 +2,7 @@ import path from "node:path";
 import { type FastifyInstance } from "fastify";
 import { createSessionRequestSchema, runRequestSchema } from "@signal-recycler/shared";
 import { type createAgentAdapterRegistry } from "../services/agentAdapters.js";
+import { type LazyContextIndexStore } from "../services/contextIndexRuntime.js";
 import { processTurn } from "../services/turnProcessor.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
@@ -13,6 +14,7 @@ export type RouteOptions = {
   workingDirectory: string;
   upstreamBaseUrl?: string;
   agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
+  contextIndexStore: LazyContextIndexStore;
 };
 
 export async function registerSessionRoutes(
@@ -62,6 +64,14 @@ export async function registerSessionRoutes(
         prompt: parsed.prompt,
         adapter: parsed.adapter,
         workingDirectory,
+        getContextIndexStore: () => {
+          const contextIndexStore = options.contextIndexStore.get();
+          if (contextIndexStore.ok) return contextIndexStore.value;
+          request.log.warn(
+            `[signal-recycler] Context index unavailable for session envelope: ${contextIndexStore.error.message}`
+          );
+          return null;
+        },
         ...(options.agentAdapterRegistry ? { agentAdapterRegistry: options.agentAdapterRegistry } : {})
       });
     } catch (error) {

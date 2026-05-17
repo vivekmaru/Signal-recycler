@@ -29,7 +29,13 @@ export function eventGroupId(event: TimelineEvent): TimelineGroupId {
   if (event.category === "memory_injection" || event.category === "rule_candidate" || event.category === "rule_auto_approved") {
     return "memory";
   }
-  if (event.category === "memory_retrieval" || event.category === "compression_result" || event.category === "proxy_request") {
+  if (
+    event.category === "memory_retrieval" ||
+    event.category === "context_retrieval" ||
+    event.category === "context_injection" ||
+    event.category === "compression_result" ||
+    event.category === "proxy_request"
+  ) {
     return "context";
   }
   return "agent";
@@ -87,7 +93,12 @@ export function groupCandidateEvents(events: TimelineEvent[]): CandidateEventGro
 }
 
 export function eventTone(category: EventCategory): "neutral" | "green" | "amber" | "red" | "blue" {
-  if (category === "memory_injection" || category === "memory_retrieval") return "blue";
+  if (
+    category === "memory_injection" ||
+    category === "memory_retrieval" ||
+    category === "context_retrieval" ||
+    category === "context_injection"
+  ) return "blue";
   if (category === "rule_candidate") return "amber";
   if (category === "rule_auto_approved") return "green";
   if (category === "compression_result") return "green";

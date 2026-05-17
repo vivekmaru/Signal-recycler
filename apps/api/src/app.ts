@@ -11,6 +11,7 @@ import { registerRuleRoutes } from "./routes/rules.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { type createAgentAdapterRegistry } from "./services/agentAdapters.js";
 import { type ContextIndexStore } from "./services/contextIndexStore.js";
+import { createLazyContextIndexStore } from "./services/contextIndexRuntime.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -28,11 +29,19 @@ type AppOptions = {
 
 export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   const { projectId, workingDirectory } = options;
+  const contextIndexStore = createLazyContextIndexStore({
+    dbPath: options.contextIndexDbPath ?? options.databasePath ?? ":memory:",
+    ...(options.contextIndexStoreFactory ? { storeFactory: options.contextIndexStoreFactory } : {})
+  });
 
   const app = Fastify({
     logger: process.env.SIGNAL_RECYCLER_LOG_LEVEL
       ? { level: process.env.SIGNAL_RECYCLER_LOG_LEVEL }
       : false
+  });
+
+  app.addHook("onClose", async () => {
+    contextIndexStore.close();
   });
 
   app.removeContentTypeParser("application/json");
@@ -83,16 +92,13 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     };
   });
 
-  await registerSessionRoutes(app, options);
+  await registerSessionRoutes(app, { ...options, contextIndexStore });
   await registerDemoRoutes(app, options);
   await registerRuleRoutes(app, options);
   await registerContextIndexRoutes(app, {
     projectId,
     workingDirectory,
-    contextIndexDbPath: options.contextIndexDbPath ?? options.databasePath ?? ":memory:",
-    ...(options.contextIndexStoreFactory
-      ? { contextIndexStoreFactory: options.contextIndexStoreFactory }
-      : {})
+    contextIndexStore
   });
   await registerProxyRoutes(app, options);
 

@@ -64,7 +64,9 @@ export const eventCategorySchema = z.enum([
   "rule_candidate",
   "rule_auto_approved",
   "memory_injection",
-  "memory_retrieval"
+  "memory_retrieval",
+  "context_retrieval",
+  "context_injection"
 ]);
 export type EventCategory = z.infer<typeof eventCategorySchema>;
 
