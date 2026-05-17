@@ -25,6 +25,7 @@ type RunContextIndexEvalInput = {
   fixtureRoot?: string;
   cases?: ContextEvalCase[];
   tempRoot?: string;
+  storeFactory?: (path: string) => ContextIndexStore;
 };
 
 const defaultFixtureRoot = resolve(
@@ -76,7 +77,7 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
     tempDir = mkdtempSync(
       join(input.tempRoot ?? tmpdir(), "signal-recycler-context-index-eval-")
     );
-    store = createContextIndexStore(join(tempDir, "index.sqlite"));
+    store = (input.storeFactory ?? createContextIndexStore)(join(tempDir, "index.sqlite"));
   } catch (error) {
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
@@ -154,6 +155,21 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
         metric("context_index_tokens_selected", selectedTokens, "tokens"),
         metric("context_index_token_efficiency_ratio", tokenEfficiency, "ratio")
       ]
+    });
+  } catch (error) {
+    return suiteResult({
+      id: "context-index",
+      title: "Context Index Retrieval",
+      cases: [
+        {
+          id: "context-index.eval",
+          title: "Context Index eval execution",
+          status: "fail",
+          summary: `eval_error=${errorSummary(error)}`,
+          details: { error: errorDetails(error) }
+        }
+      ],
+      metrics: [metric("context_index_eval_errors", 1, "errors")]
     });
   } finally {
     store.close();

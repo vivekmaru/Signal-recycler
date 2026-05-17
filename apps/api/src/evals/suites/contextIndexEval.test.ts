@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type ContextIndexStore } from "../../services/contextIndexStore.js";
 import { runContextIndexEval } from "./contextIndexEval.js";
 
 afterEach(() => {
@@ -130,5 +131,38 @@ describe("context index eval", () => {
         expect.objectContaining({ name: "context_index_store_errors", value: 1, unit: "errors" })
       ])
     );
+  });
+
+  it("reports index write failures as suite failures", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-write-root-"));
+    let closed = false;
+
+    const result = runContextIndexEval({
+      tempRoot,
+      storeFactory: () =>
+        ({
+          replaceProjectIndex() {
+            throw new Error("simulated write failure");
+          },
+          close() {
+            closed = true;
+          }
+        }) as unknown as ContextIndexStore
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.cases[0]).toMatchObject({
+      id: "context-index.eval",
+      title: "Context Index eval execution",
+      status: "fail",
+      summary: "eval_error=simulated write failure"
+    });
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_eval_errors", value: 1, unit: "errors" })
+      ])
+    );
+    expect(closed).toBe(true);
+    expect(readdirSync(tempRoot)).toHaveLength(0);
   });
 });
