@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -136,6 +136,39 @@ describe("context index eval", () => {
     );
   });
 
+  it("keeps setup cleanup failures contained in the suite result", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-setup-root-"));
+
+    const result = runContextIndexEval({
+      tempRoot,
+      storeFactory() {
+        throw new Error("simulated store setup failure");
+      },
+      tempDirRemover() {
+        throw new Error("simulated cleanup failure");
+      }
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.cases[0]).toMatchObject({
+      id: "context-index.store",
+      status: "fail",
+      summary: "store_error=simulated store setup failure",
+      details: {
+        cleanupError: {
+          message: "simulated cleanup failure"
+        }
+      }
+    });
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_store_errors", value: 1, unit: "errors" }),
+        expect.objectContaining({ name: "context_index_cleanup_errors", value: 1, unit: "errors" })
+      ])
+    );
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
   it("reports index write failures as suite failures", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-write-root-"));
     let closed = false;
@@ -200,5 +233,32 @@ describe("context index eval", () => {
       ])
     );
     expect(readdirSync(tempRoot)).toHaveLength(0);
+  });
+
+  it("reports cleanup failures as suite failures after successful eval execution", () => {
+    const tempRoot = mkdtempSync(
+      join(tmpdir(), "signal-recycler-context-index-eval-cleanup-root-")
+    );
+
+    const result = runContextIndexEval({
+      tempRoot,
+      tempDirRemover() {
+        throw new Error("simulated cleanup failure");
+      }
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.cases[0]).toMatchObject({
+      id: "context-index.cleanup",
+      title: "Temporary context index cleanup",
+      status: "fail",
+      summary: "cleanup_error=simulated cleanup failure"
+    });
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_cleanup_errors", value: 1, unit: "errors" })
+      ])
+    );
+    rmSync(tempRoot, { recursive: true, force: true });
   });
 });

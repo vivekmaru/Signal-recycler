@@ -26,6 +26,7 @@ type RunContextIndexEvalInput = {
   cases?: ContextEvalCase[];
   tempRoot?: string;
   storeFactory?: (path: string) => ContextIndexStore;
+  tempDirRemover?: (path: string) => void;
 };
 
 const defaultFixtureRoot = resolve(
@@ -70,6 +71,7 @@ const evalCases: ContextEvalCase[] = [
 export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalSuiteResult {
   const fixtureRoot = input.fixtureRoot ?? defaultFixtureRoot;
   const activeCases = input.cases ?? evalCases;
+  const removeTempDir = input.tempDirRemover ?? removeTempDirectory;
   let tempDir: string | undefined;
   let store: ContextIndexStore;
 
@@ -79,9 +81,7 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
     );
     store = (input.storeFactory ?? createContextIndexStore)(join(tempDir, "index.sqlite"));
   } catch (error) {
-    if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
+    const cleanupError = cleanupTempDir(tempDir, removeTempDir);
     return suiteResult({
       id: "context-index",
       title: "Context Index Retrieval",
@@ -91,10 +91,16 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
           title: "Temporary context index store",
           status: "fail",
           summary: `store_error=${errorSummary(error)}`,
-          details: { error: errorDetails(error) }
+          details: {
+            error: errorDetails(error),
+            ...(cleanupError ? { cleanupError: errorDetails(cleanupError) } : {})
+          }
         }
       ],
-      metrics: [metric("context_index_store_errors", 1, "errors")]
+      metrics: [
+        metric("context_index_store_errors", 1, "errors"),
+        ...(cleanupError ? [metric("context_index_cleanup_errors", 1, "errors")] : [])
+      ]
     });
   }
 
@@ -180,28 +186,61 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
   } catch (error) {
     closeError = error;
   }
-  if (tempDir) {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
+  const cleanupError = cleanupTempDir(tempDir, removeTempDir);
 
-  if (closeError && result.status === "pass") {
+  if ((closeError || cleanupError) && result.status === "pass") {
     return suiteResult({
       id: "context-index",
       title: "Context Index Retrieval",
       cases: [
-        {
-          id: "context-index.close",
-          title: "Temporary context index store close",
-          status: "fail",
-          summary: `close_error=${errorSummary(closeError)}`,
-          details: { error: errorDetails(closeError) }
-        }
+        ...(closeError
+          ? [
+              {
+                id: "context-index.close",
+                title: "Temporary context index store close",
+                status: "fail" as const,
+                summary: `close_error=${errorSummary(closeError)}`,
+                details: { error: errorDetails(closeError) }
+              }
+            ]
+          : []),
+        ...(cleanupError
+          ? [
+              {
+                id: "context-index.cleanup",
+                title: "Temporary context index cleanup",
+                status: "fail" as const,
+                summary: `cleanup_error=${errorSummary(cleanupError)}`,
+                details: { error: errorDetails(cleanupError) }
+              }
+            ]
+          : [])
       ],
-      metrics: [metric("context_index_close_errors", 1, "errors")]
+      metrics: [
+        ...(closeError ? [metric("context_index_close_errors", 1, "errors")] : []),
+        ...(cleanupError ? [metric("context_index_cleanup_errors", 1, "errors")] : [])
+      ]
     });
   }
 
   return result;
+}
+
+function cleanupTempDir(
+  tempDir: string | undefined,
+  removeTempDir: (path: string) => void
+): unknown {
+  if (!tempDir) return undefined;
+  try {
+    removeTempDir(tempDir);
+    return undefined;
+  } catch (error) {
+    return error;
+  }
+}
+
+function removeTempDirectory(path: string): void {
+  rmSync(path, { recursive: true, force: true });
 }
 
 function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCaseResult {
