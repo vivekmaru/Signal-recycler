@@ -1,15 +1,12 @@
 import { type FastifyInstance, type FastifyReply } from "fastify";
 import { contextRetrievalRequestSchema, type ContextChunk } from "@signal-recycler/shared";
-import {
-  createContextIndexStore,
-  type ContextIndexStore
-} from "../services/contextIndexStore.js";
+import { type ContextIndexStore } from "../services/contextIndexStore.js";
+import { type LazyContextIndexStore } from "../services/contextIndexRuntime.js";
 import { retrieveContextChunks } from "../services/contextIndexRetrieval.js";
 import { scanContextIndex } from "../services/contextIndexScanner.js";
 
 export type ContextIndexRouteOptions = {
-  contextIndexDbPath: string;
-  contextIndexStoreFactory?: (path: string) => ContextIndexStore;
+  contextIndexStore: LazyContextIndexStore;
   projectId: string;
   workingDirectory: string;
 };
@@ -18,13 +15,6 @@ export async function registerContextIndexRoutes(
   app: FastifyInstance,
   options: ContextIndexRouteOptions
 ): Promise<void> {
-  const createStore = options.contextIndexStoreFactory ?? createContextIndexStore;
-  let contextStore: ContextIndexStore | null = null;
-
-  app.addHook("onClose", async () => {
-    contextStore?.close();
-  });
-
   app.get("/api/context-index/status", async (_request, reply) => {
     const store = getContextStore();
     if (!store.ok) return sendUnavailable(reply, store.error);
@@ -102,13 +92,7 @@ export async function registerContextIndexRoutes(
   });
 
   function getContextStore(): { ok: true; value: ContextIndexStore } | { ok: false; error: Error } {
-    if (contextStore) return { ok: true, value: contextStore };
-    try {
-      contextStore = createStore(options.contextIndexDbPath);
-      return { ok: true, value: contextStore };
-    } catch (error) {
-      return { ok: false, error: normalizeError(error) };
-    }
+    return options.contextIndexStore.get();
   }
 }
 
@@ -122,10 +106,4 @@ function sendUnavailable(reply: FastifyReply, error: Error) {
     error: "Context index unavailable",
     message: error.message
   });
-}
-
-function normalizeError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof error === "string") return new Error(error);
-  return new Error("Unknown error");
 }

@@ -20,6 +20,7 @@ This keeps the Phase 5 boundary intact: source/doc chunks remain separate from d
 - Retrieves top-k indexed chunks using the existing `retrieveContextChunks` implementation.
 - Hydrates selected chunks for prompt injection.
 - Injects a bounded `<signal-recycler-project-context>` block with source type, path, line range, hash, and chunk text.
+- Escapes indexed chunk text before rendering it inside Signal Recycler control tags.
 - Emits:
   - `context_retrieval` with selected/skipped decisions and retrieval metrics.
   - `context_injection` with injected chunk ids and source provenance.
@@ -28,6 +29,7 @@ This keeps the Phase 5 boundary intact: source/doc chunks remain separate from d
 
 - Wires session-owned runs to the context index store in `apps/api/src/routes/sessions.ts`.
 - Uses `contextIndexDbPath` when provided, otherwise falls back to the app `databasePath`, matching the existing context-index API route behavior.
+- Shares one lazy context-index store instance between context-index routes and session routes, including the default in-memory app setup.
 - Keeps context index storage lazy so app startup and non-indexed projects still work.
 - Passes the context index store into `processTurn` only as optional envelope input.
 
@@ -64,13 +66,13 @@ This keeps the Phase 5 boundary intact: source/doc chunks remain separate from d
 ## Verification
 
 - `pnpm --filter @signal-recycler/api test -- contextEnvelope.test.ts`
-  - Result: passed, 22 files / 192 tests.
+  - Result: passed, 22 files / 195 tests.
 - `pnpm --filter @signal-recycler/api test -- server.test.ts`
-  - Result: passed, 22 files / 193 tests.
+  - Result: passed, 22 files / 195 tests.
 - `pnpm --filter @signal-recycler/web test -- eventPresenters.test.ts sessionPresenters.test.ts`
   - Result: passed, 8 files / 38 tests.
 - `pnpm test`
-  - Result: passed, CLI 32 tests, API 193 tests, Web 38 tests.
+  - Result: passed, CLI 32 tests, API 195 tests, Web 38 tests.
 - `pnpm type-check`
   - Result: passed across CLI, shared, API, and Web.
 - `pnpm build`

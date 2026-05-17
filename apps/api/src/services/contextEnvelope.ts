@@ -167,7 +167,7 @@ function renderProjectContextBlock(chunks: ContextChunk[]): string {
     .map((chunk, index) =>
       [
         `${index + 1}. [${chunk.sourceType}] ${formatChunkLocation(chunk)} hash=${chunk.hash}`,
-        truncateChunkText(chunk.text)
+        escapeEnvelopeText(truncateChunkText(chunk.text))
       ].join("\n")
     )
     .join("\n\n");
@@ -199,4 +199,8 @@ function truncateChunkText(text: string): string {
   const normalized = text.trim();
   if (normalized.length <= 1200) return normalized;
   return `${normalized.slice(0, 1200).trimEnd()}\n[truncated]`;
+}
+
+function escapeEnvelopeText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

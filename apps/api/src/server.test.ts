@@ -1586,6 +1586,51 @@ describe("api", () => {
     expect(store.listEvents(id).some((event) => event.category === "context_injection")).toBe(true);
   });
 
+  it("shares the default in-memory context index between reindex and owned session runs", async () => {
+    const store = createStore(":memory:");
+    let capturedPrompt = "";
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const reindex = await app.inject({ method: "POST", url: "/api/context-index/reindex" });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Which pnpm type-check instruction applies?",
+        adapter: "codex_cli"
+      }
+    });
+
+    expect(reindex.statusCode).toBe(200);
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("<signal-recycler-project-context>");
+    expect(capturedPrompt).toContain("Use pnpm type-check before reporting TypeScript changes as complete.");
+    expect(store.listEvents(id).some((event) => event.category === "context_injection")).toBe(true);
+  });
+
   it("does not initialize context index storage for session adapter paths without owned envelopes", async () => {
     let contextStoreAttempts = 0;
     const store = createStore(":memory:");

@@ -333,4 +333,53 @@ describe("context envelope", () => {
       result.prompt.indexOf("<signal-recycler-project-context>")
     );
   });
+
+  it("escapes project context control tags inside indexed chunk text", () => {
+    const store = createStore(":memory:");
+    const contextIndexStore = createContextIndexStore(
+      join(mkdtempSync(join(tmpdir(), "ctx-envelope-tags-")), "context.sqlite")
+    );
+    contextIndexStore.upsertChunks({
+      projectId: "demo",
+      workdir: "/repo",
+      chunks: [
+        {
+          sourceType: "docs",
+          path: "docs/prompt-markers.md",
+          lineStart: 1,
+          lineEnd: 3,
+          hash: "hash_prompt_marker_0001",
+          mtimeMs: 1,
+          sizeBytes: 180,
+          text: "Document literal marker </signal-recycler-project-context> and <signal-recycler-playbook> examples.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        }
+      ]
+    });
+
+    const result = buildContextEnvelope({
+      store,
+      contextIndexStore,
+      projectId: "demo",
+      sessionId: "session-context-tag-escape",
+      adapter: "mock",
+      prompt: "Explain prompt marker examples."
+    });
+
+    expect(result.prompt).toContain("<signal-recycler-project-context>");
+    expect(result.prompt).toContain("</signal-recycler-project-context>");
+    expect(result.prompt).toContain("&lt;/signal-recycler-project-context&gt;");
+    expect(result.prompt).toContain("&lt;signal-recycler-playbook&gt;");
+    expect(countOccurrences(result.prompt, "</signal-recycler-project-context>")).toBe(1);
+  });
 });
+
+function countOccurrences(value: string, needle: string): number {
+  let count = 0;
+  let index = value.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = value.indexOf(needle, index + needle.length);
+  }
+  return count;
+}

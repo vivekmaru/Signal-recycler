@@ -2,10 +2,7 @@ import path from "node:path";
 import { type FastifyInstance } from "fastify";
 import { createSessionRequestSchema, runRequestSchema } from "@signal-recycler/shared";
 import { type createAgentAdapterRegistry } from "../services/agentAdapters.js";
-import {
-  createContextIndexStore,
-  type ContextIndexStore
-} from "../services/contextIndexStore.js";
+import { type LazyContextIndexStore } from "../services/contextIndexRuntime.js";
 import { processTurn } from "../services/turnProcessor.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type CodexRunner } from "../types.js";
@@ -15,11 +12,9 @@ export type RouteOptions = {
   codexRunner: CodexRunner;
   projectId: string;
   workingDirectory: string;
-  databasePath?: string;
   upstreamBaseUrl?: string;
   agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
-  contextIndexDbPath?: string;
-  contextIndexStoreFactory?: (path: string) => ContextIndexStore;
+  contextIndexStore: LazyContextIndexStore;
 };
 
 export async function registerSessionRoutes(
@@ -27,11 +22,6 @@ export async function registerSessionRoutes(
   options: RouteOptions
 ): Promise<void> {
   const { projectId, workingDirectory } = options;
-  const contextIndexStore = createLazyContextIndexStore(options);
-
-  app.addHook("onClose", async () => {
-    contextIndexStore.close();
-  });
 
   app.post("/api/sessions", async (request) => {
     const parsed = createSessionRequestSchema.parse(request.body ?? {});
@@ -74,7 +64,14 @@ export async function registerSessionRoutes(
         prompt: parsed.prompt,
         adapter: parsed.adapter,
         workingDirectory,
-        getContextIndexStore: () => contextIndexStore.get((message) => request.log.warn(message)),
+        getContextIndexStore: () => {
+          const contextIndexStore = options.contextIndexStore.get();
+          if (contextIndexStore.ok) return contextIndexStore.value;
+          request.log.warn(
+            `[signal-recycler] Context index unavailable for session envelope: ${contextIndexStore.error.message}`
+          );
+          return null;
+        },
         ...(options.agentAdapterRegistry ? { agentAdapterRegistry: options.agentAdapterRegistry } : {})
       });
     } catch (error) {
@@ -112,32 +109,4 @@ export async function registerSessionRoutes(
     }
     return events;
   });
-}
-
-function createLazyContextIndexStore(options: RouteOptions) {
-  const dbPath = options.contextIndexDbPath ?? options.databasePath ?? ":memory:";
-  const factory = options.contextIndexStoreFactory ?? createContextIndexStore;
-  let store: ContextIndexStore | null = null;
-
-  return {
-    get(warn: (message: string) => void): ContextIndexStore | null {
-      if (store) return store;
-      try {
-        store = factory(dbPath);
-        return store;
-      } catch (error) {
-        warn(`[signal-recycler] Context index unavailable for session envelope: ${errorMessage(error)}`);
-        return null;
-      }
-    },
-    close(): void {
-      store?.close();
-      store = null;
-    }
-  };
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }
