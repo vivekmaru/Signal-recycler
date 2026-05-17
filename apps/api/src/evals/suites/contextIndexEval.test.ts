@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,7 @@ describe("context index eval", () => {
 
   it("deduplicates multiple selected chunks from the same path before scoring", () => {
     const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-dupe-"));
+    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-temp-root-"));
     const sourceDir = join(workdir, "apps/web/src");
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(
@@ -79,20 +80,55 @@ describe("context index eval", () => {
           title: "Duplicate path selections score once",
           query: "authentication middleware unauthorized response",
           goldPaths: ["apps/web/src/middleware.ts"],
-          limit: 5,
+          limit: 3,
           sourceTypes: ["source"]
         }
-      ]
+      ],
+      tempRoot
     });
 
     expect(result.status).toBe("pass");
     expect(result.cases[0]).toMatchObject({
       id: "context-index.duplicate-path-scoring",
       status: "pass",
-      summary: "recall@5=1, precision@5=1"
+      summary: "recall@3=1, precision@3=1"
     });
+    expect(result.cases[0]?.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_recall_at_3", value: 1 }),
+        expect.objectContaining({ name: "context_index_precision_at_3", value: 1 })
+      ])
+    );
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_recall_at_3", value: 1 }),
+        expect.objectContaining({ name: "context_index_precision_at_3", value: 1 })
+      ])
+    );
     expect(result.cases[0]?.details).toMatchObject({
       selectedPaths: ["apps/web/src/middleware.ts"]
     });
+    expect(readdirSync(tempRoot)).toHaveLength(0);
+  });
+
+  it("reports temp store setup failures as suite failures", () => {
+    const missingTempRoot = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-missing-parent-")),
+      "missing"
+    );
+
+    const result = runContextIndexEval({ tempRoot: missingTempRoot });
+
+    expect(result.status).toBe("fail");
+    expect(result.cases[0]).toMatchObject({
+      id: "context-index.store",
+      title: "Temporary context index store",
+      status: "fail"
+    });
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_store_errors", value: 1, unit: "errors" })
+      ])
+    );
   });
 });

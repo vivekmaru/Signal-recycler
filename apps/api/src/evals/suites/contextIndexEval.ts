@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ type ContextEvalCase = {
 type RunContextIndexEvalInput = {
   fixtureRoot?: string;
   cases?: ContextEvalCase[];
+  tempRoot?: string;
 };
 
 const defaultFixtureRoot = resolve(
@@ -68,9 +69,33 @@ const evalCases: ContextEvalCase[] = [
 export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalSuiteResult {
   const fixtureRoot = input.fixtureRoot ?? defaultFixtureRoot;
   const activeCases = input.cases ?? evalCases;
-  const store = createContextIndexStore(
-    join(mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-")), "index.sqlite")
-  );
+  let tempDir: string | undefined;
+  let store: ContextIndexStore;
+
+  try {
+    tempDir = mkdtempSync(
+      join(input.tempRoot ?? tmpdir(), "signal-recycler-context-index-eval-")
+    );
+    store = createContextIndexStore(join(tempDir, "index.sqlite"));
+  } catch (error) {
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+    return suiteResult({
+      id: "context-index",
+      title: "Context Index Retrieval",
+      cases: [
+        {
+          id: "context-index.store",
+          title: "Temporary context index store",
+          status: "fail",
+          summary: `store_error=${errorSummary(error)}`,
+          details: { error: errorDetails(error) }
+        }
+      ],
+      metrics: [metric("context_index_store_errors", 1, "errors")]
+    });
+  }
 
   try {
     const scanned = scanContextIndex({
@@ -106,8 +131,16 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
       0
     );
     const cases = activeCases.map((testCase) => scoreCase(testCase, store));
-    const recall = averageMetric(cases, "context_index_recall_at_5");
-    const precision = averageMetric(cases, "context_index_precision_at_5");
+    const limitMetrics = Array.from(new Set(activeCases.map((testCase) => testCase.limit)))
+      .sort((left, right) => left - right)
+      .flatMap((limit) => [
+        metric(recallMetricName(limit), averageMetric(cases, recallMetricName(limit)), "ratio"),
+        metric(
+          precisionMetricName(limit),
+          averageMetric(cases, precisionMetricName(limit)),
+          "ratio"
+        )
+      ]);
     const selectedTokens = sumMetric(cases, "context_index_selected_tokens");
     const tokenEfficiency =
       totalIndexedTokens === 0 ? 0 : Number((selectedTokens / totalIndexedTokens).toFixed(3));
@@ -117,14 +150,16 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
       title: "Context Index Retrieval",
       cases,
       metrics: [
-        metric("context_index_recall_at_5", recall, "ratio"),
-        metric("context_index_precision_at_5", precision, "ratio"),
+        ...limitMetrics,
         metric("context_index_tokens_selected", selectedTokens, "tokens"),
         metric("context_index_token_efficiency_ratio", tokenEfficiency, "ratio")
       ]
     });
   } finally {
     store.close();
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   }
 }
 
@@ -163,8 +198,8 @@ function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCas
     status: passed ? "pass" : "fail",
     summary: `recall@${testCase.limit}=${round(recall)}, precision@${testCase.limit}=${round(precision)}`,
     metrics: [
-      metric("context_index_recall_at_5", round(recall), "ratio"),
-      metric("context_index_precision_at_5", round(precision), "ratio"),
+      metric(recallMetricName(testCase.limit), round(recall), "ratio"),
+      metric(precisionMetricName(testCase.limit), round(precision), "ratio"),
       metric("context_index_selected_tokens", selectedTokens, "tokens")
     ],
     details: {
@@ -174,6 +209,28 @@ function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCas
       selected: retrieval.selected
     }
   };
+}
+
+function recallMetricName(limit: number): string {
+  return `context_index_recall_at_${limit}`;
+}
+
+function precisionMetricName(limit: number): string {
+  return `context_index_precision_at_${limit}`;
+}
+
+function errorSummary(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorDetails(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message
+    };
+  }
+  return { message: String(error) };
 }
 
 function averageMetric(cases: EvalCaseResult[], name: string): number {

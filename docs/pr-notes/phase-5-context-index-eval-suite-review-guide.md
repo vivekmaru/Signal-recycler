@@ -9,14 +9,16 @@ This is measurement work only. It does not inject source/doc chunks into session
 ## Change Map
 
 - `apps/api/src/evals/suites/contextIndexEval.ts`
-  - Creates an in-memory Context Index store.
+  - Creates a temporary SQLite-backed Context Index store and removes its temp directory after each run.
   - Scans the existing fixture repo from a module-relative path so evals do not depend on runtime CWD.
   - Scores gold-path retrieval cases for source, docs, package files, and no-searchable-term prompts.
   - Deduplicates selected file paths before recall/precision scoring while preserving raw selected chunk metadata for review.
-  - Emits aggregate recall, precision, selected-token, and efficiency metrics.
+  - Emits aggregate recall/precision metrics by case limit plus selected-token and efficiency metrics.
+  - Converts temp-store setup failures into suite failures so the eval report still renders.
 - `apps/api/src/evals/suites/contextIndexEval.test.ts`
   - Proves the suite is offline, passing, and includes reviewable selected/gold paths.
   - Covers duplicate selected chunks from one file and confirms they score as one selected path.
+  - Covers non-5 retrieval limits, temp directory cleanup, and temp-store setup failures.
 - `apps/api/src/evals/run.ts`
   - Registers the suite in local eval runs.
 - `docs/superpowers/plans/2026-05-17-context-index-eval-suite.md`
