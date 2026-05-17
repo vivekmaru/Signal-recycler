@@ -39,7 +39,15 @@ export function groupTimelineEvents(events: TimelineEvent[]): TimelineGroup[] {
   const grouped = new Map<TimelineGroupId, TimelineEvent[]>();
   for (const event of events) {
     const id = eventGroupId(event);
-    grouped.set(id, [...(grouped.get(id) ?? []), event]);
+    // ⚡ Bolt: Use push instead of array spread to maintain O(N) complexity
+    // Array spread [...prev, new] inside a loop is O(N^2) and causes severe
+    // layout block lag when processing thousands of timeline events.
+    const group = grouped.get(id);
+    if (group) {
+      group.push(event);
+    } else {
+      grouped.set(id, [event]);
+    }
   }
   return Array.from(grouped.entries()).map(([id, groupEvents]) => ({
     id,
@@ -55,7 +63,13 @@ export function groupCandidateEvents(events: TimelineEvent[]): CandidateEventGro
     if (event.category !== "rule_candidate" && event.category !== "rule_auto_approved") continue;
     const ruleId = typeof event.metadata["ruleId"] === "string" ? event.metadata["ruleId"] : null;
     const id = ruleId ?? event.id;
-    grouped.set(id, [...(grouped.get(id) ?? []), event]);
+    // ⚡ Bolt: Use push instead of array spread to maintain O(N) complexity
+    const group = grouped.get(id);
+    if (group) {
+      group.push(event);
+    } else {
+      grouped.set(id, [event]);
+    }
   }
 
   return Array.from(grouped.entries()).flatMap(([id, groupEvents]) => {
