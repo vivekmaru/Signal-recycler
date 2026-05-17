@@ -1,10 +1,16 @@
-import { type AgentAdapter, type ContextChunk } from "@signal-recycler/shared";
+import {
+  type AgentAdapter,
+  type ContextChunk,
+  type ContextRetrievalResult
+} from "@signal-recycler/shared";
 import { injectPlaybookRules } from "../playbook.js";
 import { type SignalRecyclerStore } from "../store.js";
 import { type ContextIndexStore } from "./contextIndexStore.js";
 import { retrieveContextChunks } from "./contextIndexRetrieval.js";
 import { recordMemoryInjection } from "./memoryInjection.js";
 import { retrieveRelevantMemories } from "./memoryRetrieval.js";
+
+const MAX_CONTEXT_SKIPPED_AUDIT_ENTRIES = 50;
 
 export type ContextEnvelopeInput = {
   store: SignalRecyclerStore;
@@ -109,10 +115,7 @@ function buildSourceContextEnvelope(input: ContextEnvelopeInput & { contextIndex
     ),
     metadata: {
       projectId: input.projectId,
-      query: retrieval.query,
-      selected: retrieval.selected,
-      skipped: retrieval.skipped,
-      metrics: retrieval.metrics
+      ...buildContextRetrievalAudit(retrieval)
     }
   });
 
@@ -138,12 +141,7 @@ function buildSourceContextEnvelope(input: ContextEnvelopeInput & { contextIndex
           hash: chunk.hash,
           indexedAt: chunk.indexedAt
         })),
-        retrieval: {
-          query: retrieval.query,
-          selected: retrieval.selected,
-          skipped: retrieval.skipped,
-          metrics: retrieval.metrics
-        }
+        retrieval: buildContextRetrievalAudit(retrieval)
       }
     });
   }
@@ -166,7 +164,7 @@ function renderProjectContextBlock(chunks: ContextChunk[]): string {
   const body = chunks
     .map((chunk, index) =>
       [
-        `${index + 1}. [${chunk.sourceType}] ${formatChunkLocation(chunk)} hash=${chunk.hash}`,
+        `${index + 1}. [${chunk.sourceType}] ${escapeEnvelopeText(formatChunkLocation(chunk))} hash=${escapeEnvelopeText(chunk.hash)}`,
         escapeEnvelopeText(truncateChunkText(chunk.text))
       ].join("\n")
     )
@@ -203,4 +201,15 @@ function truncateChunkText(text: string): string {
 
 function escapeEnvelopeText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function buildContextRetrievalAudit(retrieval: ContextRetrievalResult) {
+  const skipped = retrieval.skipped.slice(0, MAX_CONTEXT_SKIPPED_AUDIT_ENTRIES);
+  return {
+    query: retrieval.query,
+    selected: retrieval.selected,
+    skipped,
+    skippedOmitted: Math.max(0, retrieval.skipped.length - skipped.length),
+    metrics: retrieval.metrics
+  };
 }

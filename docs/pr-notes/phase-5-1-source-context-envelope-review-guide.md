@@ -20,10 +20,11 @@ This keeps the Phase 5 boundary intact: source/doc chunks remain separate from d
 - Retrieves top-k indexed chunks using the existing `retrieveContextChunks` implementation.
 - Hydrates selected chunks for prompt injection.
 - Injects a bounded `<signal-recycler-project-context>` block with source type, path, line range, hash, and chunk text.
-- Escapes indexed chunk text before rendering it inside Signal Recycler control tags.
+- Escapes indexed chunk text and chunk metadata before rendering it inside Signal Recycler control tags.
 - Emits:
   - `context_retrieval` with selected/skipped decisions and retrieval metrics.
   - `context_injection` with injected chunk ids and source provenance.
+- Caps skipped chunk audit samples while preserving full skipped counts in retrieval metrics.
 
 ### Session Runtime
 
@@ -66,13 +67,13 @@ This keeps the Phase 5 boundary intact: source/doc chunks remain separate from d
 ## Verification
 
 - `pnpm --filter @signal-recycler/api test -- contextEnvelope.test.ts`
-  - Result: passed, 22 files / 195 tests.
+  - Result: passed, 22 files / 196 tests.
 - `pnpm --filter @signal-recycler/api test -- server.test.ts`
   - Result: passed, 22 files / 195 tests.
 - `pnpm --filter @signal-recycler/web test -- eventPresenters.test.ts sessionPresenters.test.ts`
   - Result: passed, 8 files / 38 tests.
 - `pnpm test`
-  - Result: passed, CLI 32 tests, API 195 tests, Web 38 tests.
+  - Result: passed, CLI 32 tests, API 196 tests, Web 38 tests.
 - `pnpm type-check`
   - Result: passed across CLI, shared, API, and Web.
 - `pnpm build`
