@@ -1,6 +1,6 @@
 # Context Index Eval Suite Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Use `bd` for durable task tracking; the task sections below are execution guidance, not markdown TODO state.
 
 **Goal:** Add a deterministic Phase 5 eval suite that measures Context Index retrieval recall, precision, and context/token efficiency over `fixtures/context-index-repo`.
 
@@ -29,7 +29,7 @@ Phase 5 success criteria require docs/source chunks to be retrievable with measu
 
 ### Task 1: Add Failing Context Index Eval Tests
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Add `apps/api/src/evals/suites/contextIndexEval.test.ts`:
 
@@ -80,7 +80,7 @@ describe("context index eval", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- **Step 2: Run test to verify RED**
 
 Run:
 
@@ -92,7 +92,7 @@ Expected: fail because `./contextIndexEval.js` does not exist.
 
 ### Task 2: Implement The Eval Suite
 
-- [ ] **Step 1: Add minimal implementation**
+- **Step 1: Add minimal implementation**
 
 Create `apps/api/src/evals/suites/contextIndexEval.ts` with:
 
@@ -270,7 +270,7 @@ function round(value: number): number {
 }
 ```
 
-- [ ] **Step 2: Run test to verify GREEN**
+- **Step 2: Run test to verify GREEN**
 
 Run:
 
@@ -282,11 +282,11 @@ Expected: pass.
 
 ### Task 3: Register The Suite
 
-- [ ] **Step 1: Add failing integration expectation**
+- **Step 1: Add failing integration expectation**
 
 Update an existing eval runner/report test if present; if no direct runner test exists, add an assertion to `apps/api/src/evals/suites/contextIndexEval.test.ts` that `runContextIndexEval().id` is `"context-index"` and then register the suite in `run.ts`.
 
-- [ ] **Step 2: Modify `apps/api/src/evals/run.ts`**
+- **Step 2: Modify `apps/api/src/evals/run.ts`**
 
 Add:
 
@@ -300,7 +300,7 @@ and insert after retrieval:
 suites.push(await timed("context-index", runContextIndexEval));
 ```
 
-- [ ] **Step 3: Verify eval command**
+- **Step 3: Verify eval command**
 
 Run:
 
@@ -312,15 +312,15 @@ Expected: report status is `pass` and report includes `Context Index Retrieval`.
 
 ### Task 4: Required PR Notes And Final Verification
 
-- [ ] **Step 1: Create PR review guide**
+- **Step 1: Create PR review guide**
 
 Create `docs/pr-notes/phase-5-context-index-eval-suite-review-guide.md` with scope, change map, reviewer focus, verification commands, and out-of-scope Phase 5 items.
 
-- [ ] **Step 2: Create follow-up backlog**
+- **Step 2: Create follow-up backlog**
 
 Create `docs/pr-notes/phase-5-context-index-eval-suite-follow-up-backlog.md` with P0/P1/P2 residual work. Do not hide blocking correctness bugs in the backlog.
 
-- [ ] **Step 3: Full verification**
+- **Step 3: Full verification**
 
 Run:
 

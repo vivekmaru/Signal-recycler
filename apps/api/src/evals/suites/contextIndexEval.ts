@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type ContextSourceType } from "@signal-recycler/shared";
 import {
   createContextIndexStore,
@@ -20,7 +21,15 @@ type ContextEvalCase = {
   sourceTypes?: ContextSourceType[];
 };
 
-const fixtureRoot = resolve(process.cwd(), "../../fixtures/context-index-repo");
+type RunContextIndexEvalInput = {
+  fixtureRoot?: string;
+  cases?: ContextEvalCase[];
+};
+
+const defaultFixtureRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../../fixtures/context-index-repo"
+);
 const projectId = "context-index-eval";
 const evalCases: ContextEvalCase[] = [
   {
@@ -56,7 +65,9 @@ const evalCases: ContextEvalCase[] = [
   }
 ];
 
-export function runContextIndexEval(): EvalSuiteResult {
+export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalSuiteResult {
+  const fixtureRoot = input.fixtureRoot ?? defaultFixtureRoot;
+  const activeCases = input.cases ?? evalCases;
   const store = createContextIndexStore(
     join(mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-")), "index.sqlite")
   );
@@ -94,7 +105,7 @@ export function runContextIndexEval(): EvalSuiteResult {
       (sum, chunk) => sum + estimateTokens(chunk.text),
       0
     );
-    const cases = evalCases.map((testCase) => scoreCase(testCase, store));
+    const cases = activeCases.map((testCase) => scoreCase(testCase, store));
     const recall = averageMetric(cases, "context_index_recall_at_5");
     const precision = averageMetric(cases, "context_index_precision_at_5");
     const selectedTokens = sumMetric(cases, "context_index_selected_tokens");
@@ -125,7 +136,7 @@ function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCas
     limit: testCase.limit,
     ...(testCase.sourceTypes ? { sourceTypes: testCase.sourceTypes } : {})
   });
-  const selectedPaths = retrieval.selected.map((decision) => decision.path);
+  const selectedPaths = Array.from(new Set(retrieval.selected.map((decision) => decision.path)));
   const gold = new Set(testCase.goldPaths);
   const truePositiveCount = selectedPaths.filter((path) => gold.has(path)).length;
   const recall =
