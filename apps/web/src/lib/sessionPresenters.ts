@@ -58,7 +58,13 @@ export function buildDashboardMetrics(input: {
     approvedMemory: input.memories.filter((memory) => memory.status === "approved" && !memory.supersededBy).length,
     pendingMemory: input.memories.filter((memory) => memory.status === "pending").length,
     recentContextEvents: input.events.filter((event) =>
-      ["memory_retrieval", "memory_injection", "compression_result"].includes(event.category)
+      [
+        "memory_retrieval",
+        "memory_injection",
+        "context_retrieval",
+        "context_injection",
+        "compression_result"
+      ].includes(event.category)
     ).length
   };
 }

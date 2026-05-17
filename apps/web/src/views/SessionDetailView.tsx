@@ -20,6 +20,8 @@ type SessionTab = "timeline" | "context" | "diff" | "candidates";
 const contextCategories = new Set<TimelineEvent["category"]>([
   "memory_retrieval",
   "memory_injection",
+  "context_retrieval",
+  "context_injection",
   "compression_result"
 ]);
 
@@ -70,7 +72,7 @@ export function SessionDetailView({
   const sdkSummary = useMemo(() => summarizeSdkSession(events), [events]);
   const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
   const selectedMemory = memories.find((memory) => memory.id === selectedMemoryId) ?? null;
-  const retrievalEvents = events.filter((event) => event.category === "memory_retrieval");
+  const retrievalEvents = events.filter((event) => event.category === "memory_retrieval" || event.category === "context_retrieval");
   const injectionEvents = events.filter((event) => event.category === "memory_injection");
   const contextEvents = events.filter((event) => contextCategories.has(event.category));
   const candidateGroups = groupCandidateEvents(events);
@@ -162,7 +164,7 @@ export function SessionDetailView({
         </div>
         <div className="grid gap-3 border-t border-stone-200 bg-stone-50 p-3 md:grid-cols-3 xl:grid-cols-6">
           <MetricTile label="Memories injected" value={summary.memoryIn} detail={`${injectionEvents.length} injection events`} />
-          <MetricTile label="Retrieval events" value={retrievalEvents.length} detail="selected and skipped memory" />
+          <MetricTile label="Retrieval events" value={retrievalEvents.length} detail="selected and skipped context" />
           <MetricTile label="SDK events" value={sdkSummary.eventCount} detail={`${sdkSummary.itemCount} item events`} />
           <MetricTile
             label="SDK tokens"
@@ -596,6 +598,24 @@ function ContextMetadata({ event }: { event: TimelineEvent }) {
     );
   }
 
+  if (event.category === "context_retrieval") {
+    const selected = metadataRecords(event.metadata["selected"]);
+    const skipped = metadataRecords(event.metadata["skipped"]);
+    const metrics = metadataRecord(event.metadata["metrics"]);
+
+    return (
+      <div className="mt-3 space-y-3">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <MetadataBlock label="Selected" value={String(selected.length)} />
+          <MetadataBlock label="Skipped" value={String(skipped.length)} />
+          <MetadataBlock label="Limit" value={metadataScalar(metrics["limit"]) ?? "unknown"} />
+        </div>
+        <RetrievalDecisionList label="Selected context" records={selected} />
+        <RetrievalDecisionList label="Skipped context" records={skipped} />
+      </div>
+    );
+  }
+
   if (event.category === "memory_injection") {
     const memoryIds = metadataStrings(event.metadata["memoryIds"]);
     return (
@@ -605,6 +625,23 @@ function ContextMetadata({ event }: { event: TimelineEvent }) {
         ) : (
           memoryIds.map((id) => <Badge key={id}>{id}</Badge>)
         )}
+      </div>
+    );
+  }
+
+  if (event.category === "context_injection") {
+    const chunkIds = metadataStrings(event.metadata["contextChunkIds"]);
+    const sources = metadataRecords(event.metadata["sources"]);
+    return (
+      <div className="mt-3 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {chunkIds.length === 0 ? (
+            <span className="text-xs text-stone-500">No context chunk IDs recorded.</span>
+          ) : (
+            chunkIds.map((id) => <Badge key={id}>{id}</Badge>)
+          )}
+        </div>
+        <RetrievalDecisionList label="Injected source" records={sources} />
       </div>
     );
   }
@@ -719,7 +756,7 @@ function RetrievalDecisionList({ label, records }: { label: string; records: Arr
           <div className="min-w-0 text-xs leading-5 text-stone-600" key={`${label}-${index}`}>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="font-mono font-semibold text-stone-900">
-                {metadataScalar(record["memoryId"]) ?? "unknown-memory"}
+                {metadataScalar(record["memoryId"]) ?? metadataScalar(record["chunkId"]) ?? metadataScalar(record["id"]) ?? "unknown"}
               </span>
               {metadataScalar(record["rank"]) ? <Badge>rank {metadataScalar(record["rank"])}</Badge> : null}
               {metadataScalar(record["score"]) ? <Badge>score {metadataScalar(record["score"])}</Badge> : null}
@@ -730,6 +767,14 @@ function RetrievalDecisionList({ label, records }: { label: string; records: Arr
                 {[metadataScalar(record["category"]), metadataScalar(record["memoryType"])]
                   .filter(Boolean)
                   .join(" / ")}
+              </div>
+            ) : null}
+            {metadataScalar(record["path"]) ? (
+              <div className="mt-1 font-mono text-stone-500">
+                {metadataScalar(record["sourceType"]) ? `${metadataScalar(record["sourceType"])} / ` : null}
+                {metadataScalar(record["path"])}
+                {metadataScalar(record["lineStart"]) ? `:${metadataScalar(record["lineStart"])}` : null}
+                {metadataScalar(record["lineEnd"]) ? `-${metadataScalar(record["lineEnd"])}` : null}
               </div>
             ) : null}
           </div>

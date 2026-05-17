@@ -172,4 +172,17 @@ describe("session presenters", () => {
       }).activeSessions
     ).toBe(1);
   });
+
+  it("counts source context retrieval and injection as dashboard context activity", () => {
+    expect(
+      buildDashboardMetrics({
+        sessions: [session],
+        events: [
+          event({ id: "e1", category: "context_retrieval", title: "Retrieved context" }),
+          event({ id: "e2", category: "context_injection", title: "Injected context" })
+        ],
+        memories: []
+      }).recentContextEvents
+    ).toBe(2);
+  });
 });

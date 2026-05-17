@@ -1415,6 +1415,222 @@ describe("api", () => {
     });
   });
 
+  it("injects indexed source context into owned session adapter runs", async () => {
+    const store = createStore(":memory:");
+    const contextIndexDbPath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-session-context-")),
+      "context.sqlite"
+    );
+    const contextStore = createContextIndexStore(contextIndexDbPath);
+    contextStore.upsertChunks({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: TEST_APP_OPTIONS.workingDirectory,
+      chunks: [
+        {
+          sourceType: "source",
+          path: "apps/api/src/app.ts",
+          lineStart: 10,
+          lineEnd: 18,
+          hash: "hash_session_context_0001",
+          mtimeMs: 1,
+          sizeBytes: 120,
+          text: "The Fastify app registers session routes before context index routes.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        },
+        {
+          sourceType: "docs",
+          path: "README.md",
+          lineStart: 1,
+          lineEnd: 5,
+          hash: "hash_session_readme_0001",
+          mtimeMs: 1,
+          sizeBytes: 120,
+          text: "Signal Recycler manages memory for coding agents.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        }
+      ]
+    });
+    contextStore.close();
+    let capturedPrompt = "";
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      contextIndexDbPath,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "How are session routes registered in the Fastify app?",
+        adapter: "codex_cli"
+      }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("<signal-recycler-project-context>");
+    expect(capturedPrompt).toContain("apps/api/src/app.ts:10-18");
+    expect(events.map((event) => event.category)).toEqual(
+      expect.arrayContaining(["context_retrieval", "context_injection"])
+    );
+    expect(events.find((event) => event.category === "context_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "How are session routes registered in the Fastify app?",
+      selected: [
+        expect.objectContaining({
+          path: "apps/api/src/app.ts",
+          lineStart: 10,
+          lineEnd: 18
+        })
+      ],
+      metrics: expect.objectContaining({
+        indexedChunks: 2,
+        selectedChunks: 1,
+        skippedChunks: 1
+      })
+    });
+    expect(events.find((event) => event.category === "context_injection")?.metadata).toMatchObject({
+      adapter: "codex_cli",
+      reason: "indexed_project_context",
+      sources: [
+        expect.objectContaining({
+          path: "apps/api/src/app.ts",
+          hash: "hash_session_context_0001"
+        })
+      ]
+    });
+  });
+
+  it("uses the app database path as the owned-session context index fallback", async () => {
+    const store = createStore(":memory:");
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-session-context-fallback-")),
+      "db.sqlite"
+    );
+    const contextStore = createContextIndexStore(databasePath);
+    contextStore.upsertChunks({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: TEST_APP_OPTIONS.workingDirectory,
+      chunks: [
+        {
+          sourceType: "agent_instructions",
+          path: "AGENTS.md",
+          lineStart: 1,
+          lineEnd: 4,
+          hash: "hash_session_fallback_0001",
+          mtimeMs: 1,
+          sizeBytes: 120,
+          text: "Use pnpm type-check before reporting TypeScript changes.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        }
+      ]
+    });
+    contextStore.close();
+    let capturedPrompt = "";
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      databasePath,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Which type-check command should be used?",
+        adapter: "codex_cli"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("Use pnpm type-check before reporting TypeScript changes.");
+    expect(store.listEvents(id).some((event) => event.category === "context_injection")).toBe(true);
+  });
+
+  it("does not initialize context index storage for session adapter paths without owned envelopes", async () => {
+    let contextStoreAttempts = 0;
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      contextIndexStoreFactory: () => {
+        contextStoreAttempts += 1;
+        throw new Error("context index should not be opened");
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_sdk: {
+            id: "codex_sdk",
+            run: async (input) => ({
+              finalResponse: input.prompt,
+              items: [{ type: "sdk" }]
+            })
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Run through Codex SDK compatibility path.",
+        adapter: "codex_sdk"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(contextStoreAttempts).toBe(0);
+    expect(store.listEvents(id).some((event) => event.category === "context_retrieval")).toBe(false);
+  });
+
   it("returns a clear error when the Codex CLI adapter is selected before configuration", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
