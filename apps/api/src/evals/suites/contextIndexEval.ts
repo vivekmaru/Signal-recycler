@@ -98,6 +98,7 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
     });
   }
 
+  let result: EvalSuiteResult;
   try {
     const scanned = scanContextIndex({
       projectId,
@@ -105,7 +106,7 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
       indexedAt: "2026-05-14T00:00:00.000Z"
     });
     if (scanned.errors.length > 0) {
-      return suiteResult({
+      result = suiteResult({
         id: "context-index",
         title: "Context Index Retrieval",
         cases: [
@@ -119,45 +120,45 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
         ],
         metrics: [metric("context_index_scan_errors", scanned.errors.length, "errors")]
       });
+    } else {
+      store.replaceProjectIndex({
+        projectId,
+        workdir: fixtureRoot,
+        chunks: scanned.chunks.map(({ projectId: _projectId, ...chunk }) => chunk)
+      });
+
+      const totalIndexedTokens = scanned.chunks.reduce(
+        (sum, chunk) => sum + estimateTokens(chunk.text),
+        0
+      );
+      const cases = activeCases.map((testCase) => scoreCase(testCase, store));
+      const limitMetrics = Array.from(new Set(activeCases.map((testCase) => testCase.limit)))
+        .sort((left, right) => left - right)
+        .flatMap((limit) => [
+          metric(recallMetricName(limit), averageMetric(cases, recallMetricName(limit)), "ratio"),
+          metric(
+            precisionMetricName(limit),
+            averageMetric(cases, precisionMetricName(limit)),
+            "ratio"
+          )
+        ]);
+      const selectedTokens = sumMetric(cases, "context_index_selected_tokens");
+      const tokenEfficiency =
+        totalIndexedTokens === 0 ? 0 : Number((selectedTokens / totalIndexedTokens).toFixed(3));
+
+      result = suiteResult({
+        id: "context-index",
+        title: "Context Index Retrieval",
+        cases,
+        metrics: [
+          ...limitMetrics,
+          metric("context_index_tokens_selected", selectedTokens, "tokens"),
+          metric("context_index_token_efficiency_ratio", tokenEfficiency, "ratio")
+        ]
+      });
     }
-
-    store.replaceProjectIndex({
-      projectId,
-      workdir: fixtureRoot,
-      chunks: scanned.chunks.map(({ projectId: _projectId, ...chunk }) => chunk)
-    });
-
-    const totalIndexedTokens = scanned.chunks.reduce(
-      (sum, chunk) => sum + estimateTokens(chunk.text),
-      0
-    );
-    const cases = activeCases.map((testCase) => scoreCase(testCase, store));
-    const limitMetrics = Array.from(new Set(activeCases.map((testCase) => testCase.limit)))
-      .sort((left, right) => left - right)
-      .flatMap((limit) => [
-        metric(recallMetricName(limit), averageMetric(cases, recallMetricName(limit)), "ratio"),
-        metric(
-          precisionMetricName(limit),
-          averageMetric(cases, precisionMetricName(limit)),
-          "ratio"
-        )
-      ]);
-    const selectedTokens = sumMetric(cases, "context_index_selected_tokens");
-    const tokenEfficiency =
-      totalIndexedTokens === 0 ? 0 : Number((selectedTokens / totalIndexedTokens).toFixed(3));
-
-    return suiteResult({
-      id: "context-index",
-      title: "Context Index Retrieval",
-      cases,
-      metrics: [
-        ...limitMetrics,
-        metric("context_index_tokens_selected", selectedTokens, "tokens"),
-        metric("context_index_token_efficiency_ratio", tokenEfficiency, "ratio")
-      ]
-    });
   } catch (error) {
-    return suiteResult({
+    result = suiteResult({
       id: "context-index",
       title: "Context Index Retrieval",
       cases: [
@@ -171,12 +172,36 @@ export function runContextIndexEval(input: RunContextIndexEvalInput = {}): EvalS
       ],
       metrics: [metric("context_index_eval_errors", 1, "errors")]
     });
-  } finally {
-    store.close();
-    if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
   }
+
+  let closeError: unknown;
+  try {
+    store.close();
+  } catch (error) {
+    closeError = error;
+  }
+  if (tempDir) {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  if (closeError && result.status === "pass") {
+    return suiteResult({
+      id: "context-index",
+      title: "Context Index Retrieval",
+      cases: [
+        {
+          id: "context-index.close",
+          title: "Temporary context index store close",
+          status: "fail",
+          summary: `close_error=${errorSummary(closeError)}`,
+          details: { error: errorDetails(closeError) }
+        }
+      ],
+      metrics: [metric("context_index_close_errors", 1, "errors")]
+    });
+  }
+
+  return result;
 }
 
 function scoreCase(testCase: ContextEvalCase, store: ContextIndexStore): EvalCaseResult {

@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type ContextIndexStore } from "../../services/contextIndexStore.js";
+import {
+  createContextIndexStore,
+  type ContextIndexStore
+} from "../../services/contextIndexStore.js";
 import { runContextIndexEval } from "./contextIndexEval.js";
 
 afterEach(() => {
@@ -146,6 +149,7 @@ describe("context index eval", () => {
           },
           close() {
             closed = true;
+            throw new Error("simulated close failure");
           }
         }) as unknown as ContextIndexStore
     });
@@ -163,6 +167,38 @@ describe("context index eval", () => {
       ])
     );
     expect(closed).toBe(true);
+    expect(readdirSync(tempRoot)).toHaveLength(0);
+  });
+
+  it("reports close failures as suite failures after successful eval execution", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "signal-recycler-context-index-eval-close-root-"));
+
+    const result = runContextIndexEval({
+      tempRoot,
+      storeFactory(path) {
+        const store = createContextIndexStore(path);
+        return {
+          ...store,
+          close() {
+            store.close();
+            throw new Error("simulated close failure");
+          }
+        };
+      }
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.cases[0]).toMatchObject({
+      id: "context-index.close",
+      title: "Temporary context index store close",
+      status: "fail",
+      summary: "close_error=simulated close failure"
+    });
+    expect(result.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "context_index_close_errors", value: 1, unit: "errors" })
+      ])
+    );
     expect(readdirSync(tempRoot)).toHaveLength(0);
   });
 });
