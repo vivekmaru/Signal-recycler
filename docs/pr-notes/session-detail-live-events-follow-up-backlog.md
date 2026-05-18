@@ -9,6 +9,7 @@ This branch implements a polling-backed Session Detail live event path for Beads
 Beads:
 
 - `idea-1-dye`: Session Detail has direct detail-route event polling with active and idle cadences.
+- `idea-1-y7s`: PR #31 review comments addressed for run-error visibility, continued-run scoping, retry loading state, and null-selected active-run coverage.
 
 ## P1: Replace Short-Lived SSE With True Event Streaming
 

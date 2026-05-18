@@ -14,10 +14,13 @@ export function sessionDetailPollInterval(input: {
 export function isSessionDetailRunActive(input: {
   selectedSessionId: string | null;
   continuedSessionRunning: boolean;
+  continuedSessionId: string | null;
   newSessionRunning: boolean;
   optimisticSessionId: string | null;
 }): boolean {
   if (!input.selectedSessionId) return false;
-  if (input.continuedSessionRunning) return true;
+  if (input.continuedSessionRunning) {
+    return input.selectedSessionId === input.continuedSessionId;
+  }
   return input.newSessionRunning && input.selectedSessionId === input.optimisticSessionId;
 }

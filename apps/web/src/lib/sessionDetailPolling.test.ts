@@ -28,10 +28,35 @@ describe("session detail polling", () => {
       isSessionDetailRunActive({
         selectedSessionId: "session_1",
         continuedSessionRunning: true,
+        continuedSessionId: "session_1",
         newSessionRunning: false,
         optimisticSessionId: null
       })
     ).toBe(true);
+  });
+
+  it("ignores continued runs for a different selected detail session", () => {
+    expect(
+      isSessionDetailRunActive({
+        selectedSessionId: "session_2",
+        continuedSessionRunning: true,
+        continuedSessionId: "session_1",
+        newSessionRunning: false,
+        optimisticSessionId: null
+      })
+    ).toBe(false);
+  });
+
+  it("does not treat any run as active without a selected detail session", () => {
+    expect(
+      isSessionDetailRunActive({
+        selectedSessionId: null,
+        continuedSessionRunning: true,
+        continuedSessionId: "session_1",
+        newSessionRunning: true,
+        optimisticSessionId: "session_new"
+      })
+    ).toBe(false);
   });
 
   it("treats the optimistic new session as active only while it is selected", () => {
@@ -39,6 +64,7 @@ describe("session detail polling", () => {
       isSessionDetailRunActive({
         selectedSessionId: "session_new",
         continuedSessionRunning: false,
+        continuedSessionId: null,
         newSessionRunning: true,
         optimisticSessionId: "session_new"
       })
@@ -47,6 +73,7 @@ describe("session detail polling", () => {
       isSessionDetailRunActive({
         selectedSessionId: "session_other",
         continuedSessionRunning: false,
+        continuedSessionId: null,
         newSessionRunning: true,
         optimisticSessionId: "session_new"
       })

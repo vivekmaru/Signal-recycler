@@ -20,6 +20,14 @@ The implementation keeps the slice polling-based and local-first. It does not re
 
 - Adds `apps/web/src/lib/sessionDetailPolling.ts` for the active/idle polling policy and run-active detection.
 - Adds unit tests for no-session, active-run, idle, continued-run, and optimistic-new-session cases.
+- Scopes continued-run activity to the same selected session so navigating to another detail page does not keep that page on active cadence.
+
+### PR Review Follow-Up
+
+- Preserves continue-run errors when polling cadence flips from active to idle.
+- Keeps repeated event-fetch retry errors visible instead of re-entering loading state on every automatic retry.
+- Adds explicit helper coverage for `selectedSessionId: null` while run flags are true.
+- Associates continued-run errors with the source session before rendering them in Session Detail.
 
 ## Reviewer Focus Areas
 
@@ -38,11 +46,11 @@ The implementation keeps the slice polling-based and local-first. It does not re
 ## Verification Commands And Results
 
 - `pnpm --filter @signal-recycler/web test -- sessionDetailPolling.test.ts`
-  - Result: passed, 9 files / 45 tests.
+  - Result: passed, 9 files / 47 tests.
 - `pnpm --filter @signal-recycler/web type-check`
   - Result: passed.
 - `pnpm test`
-  - Result: passed, CLI 32 tests, API 201 tests, Web 45 tests.
+  - Result: passed, CLI 32 tests, API 201 tests, Web 47 tests.
 - `pnpm type-check`
   - Result: passed across CLI, shared, API, and Web.
 - `pnpm build`
