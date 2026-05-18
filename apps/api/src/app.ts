@@ -1,6 +1,7 @@
 import path from "node:path";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
+import { registerContextIndexRoutes } from "./routes/contextIndex.js";
 import { registerDemoRoutes } from "./routes/demo.js";
 import {
   registerProxyRoutes,
@@ -9,6 +10,8 @@ import {
 import { registerRuleRoutes } from "./routes/rules.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { type createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { type ContextIndexStore } from "./services/contextIndexStore.js";
+import { createLazyContextIndexStore } from "./services/contextIndexRuntime.js";
 import { type SignalRecyclerStore } from "./store.js";
 import { type CodexRunner } from "./types.js";
 
@@ -18,17 +21,27 @@ type AppOptions = {
   projectId: string;
   workingDirectory: string;
   databasePath?: string;
+  contextIndexDbPath?: string;
+  contextIndexStoreFactory?: (path: string) => ContextIndexStore;
   upstreamBaseUrl?: string;
   agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
 };
 
 export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   const { projectId, workingDirectory } = options;
+  const contextIndexStore = createLazyContextIndexStore({
+    dbPath: options.contextIndexDbPath ?? options.databasePath ?? ":memory:",
+    ...(options.contextIndexStoreFactory ? { storeFactory: options.contextIndexStoreFactory } : {})
+  });
 
   const app = Fastify({
     logger: process.env.SIGNAL_RECYCLER_LOG_LEVEL
       ? { level: process.env.SIGNAL_RECYCLER_LOG_LEVEL }
       : false
+  });
+
+  app.addHook("onClose", async () => {
+    contextIndexStore.close();
   });
 
   app.removeContentTypeParser("application/json");
@@ -79,9 +92,14 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     };
   });
 
-  await registerSessionRoutes(app, options);
+  await registerSessionRoutes(app, { ...options, contextIndexStore });
   await registerDemoRoutes(app, options);
   await registerRuleRoutes(app, options);
+  await registerContextIndexRoutes(app, {
+    projectId,
+    workingDirectory,
+    contextIndexStore
+  });
   await registerProxyRoutes(app, options);
 
   return app;

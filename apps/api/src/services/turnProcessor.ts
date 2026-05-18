@@ -9,6 +9,7 @@ import { type AgentAdapter, type AgentRunResult, type CodexRunner } from "../typ
 import { buildContextEnvelope } from "./contextEnvelope.js";
 import { type AgentAdapterRegistry } from "./agentAdapters.js";
 import { createMockAdapter } from "./mockAdapter.js";
+import { type ContextIndexStore } from "./contextIndexStore.js";
 
 export type ProcessTurnInput = {
   store: SignalRecyclerStore;
@@ -18,6 +19,8 @@ export type ProcessTurnInput = {
   prompt: string;
   adapter?: AgentAdapterId;
   agentAdapterRegistry?: AgentAdapterRegistry;
+  contextIndexStore?: ContextIndexStore;
+  getContextIndexStore?: () => ContextIndexStore | null;
   workingDirectory?: string;
   classifyTitle?: string;
 };
@@ -134,13 +137,17 @@ async function runAgentAdapter(
   input: ProcessTurnInput,
   adapter: AgentAdapter
 ): Promise<AgentRunResult> {
+  const contextIndexStore = shouldBuildContextEnvelope(adapter)
+    ? input.contextIndexStore ?? input.getContextIndexStore?.() ?? null
+    : null;
   const prompt = shouldBuildContextEnvelope(adapter)
     ? buildContextEnvelope({
         store: input.store,
         projectId: input.projectId,
         sessionId: input.sessionId,
         adapter: adapter.id,
-        prompt: input.prompt
+        prompt: input.prompt,
+        ...(contextIndexStore ? { contextIndexStore } : {})
       }).prompt
     : input.prompt;
 

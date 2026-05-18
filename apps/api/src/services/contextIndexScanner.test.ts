@@ -1,0 +1,289 @@
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import { scanContextIndex } from "./contextIndexScanner.js";
+
+const fixtureRoot = resolve(process.cwd(), "../../fixtures/context-index-repo");
+
+describe("context index scanner", () => {
+  it("indexes docs, agent instructions, package files, config, source, and tests", () => {
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir: fixtureRoot,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.chunks.map((chunk) => chunk.path)).toEqual(
+      expect.arrayContaining([
+        "README.md",
+        "AGENTS.md",
+        "package.json",
+        "tsconfig.json",
+        "apps/web/src/middleware.ts",
+        "apps/web/src/auth.ts",
+        "apps/web/src/auth.test.ts"
+      ])
+    );
+    expect(result.chunks.find((chunk) => chunk.path === "README.md")?.sourceType).toBe("docs");
+    expect(result.chunks.find((chunk) => chunk.path === "AGENTS.md")?.sourceType).toBe(
+      "agent_instructions"
+    );
+    expect(result.chunks.find((chunk) => chunk.path === "package.json")?.sourceType).toBe(
+      "package"
+    );
+    expect(result.chunks.find((chunk) => chunk.path === "tsconfig.json")?.sourceType).toBe(
+      "config"
+    );
+    expect(result.chunks.find((chunk) => chunk.path === "apps/web/src/auth.ts")?.sourceType).toBe(
+      "source"
+    );
+    expect(result.chunks.find((chunk) => chunk.path.endsWith(".test.ts"))?.sourceType).toBe(
+      "tests"
+    );
+  });
+
+  it("excludes generated and dependency directories", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-excluded-scan-"));
+    writeFileSync(join(workdir, "README.md"), "indexed docs\n");
+    for (const segment of [
+      ".git",
+      ".beads",
+      ".signal-recycler",
+      "node_modules",
+      "dist",
+      "build",
+      "coverage",
+      ".next",
+      ".turbo",
+      ".vite"
+    ]) {
+      mkdirSync(join(workdir, segment), { recursive: true });
+      writeFileSync(join(workdir, segment, "ignored.md"), "This file must not be indexed.\n");
+    }
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.chunks.map((chunk) => chunk.path)).toEqual(["README.md"]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("records stable hashes, line ranges, file metadata, and slash-normalized paths", () => {
+    const first = scanContextIndex({
+      projectId: "fixture",
+      workdir: fixtureRoot,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const second = scanContextIndex({
+      projectId: "fixture",
+      workdir: fixtureRoot,
+      indexedAt: "2026-05-14T00:01:00.000Z"
+    });
+    const firstReadme = first.chunks.find((chunk) => chunk.path === "README.md");
+    const secondReadme = second.chunks.find((chunk) => chunk.path === "README.md");
+
+    expect(firstReadme).toMatchObject({
+      projectId: "fixture",
+      lineStart: 1,
+      lineEnd: 5,
+      indexedAt: "2026-05-14T00:00:00.000Z",
+      mtimeMs: expect.any(Number),
+      sizeBytes: expect.any(Number)
+    });
+    expect(firstReadme?.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(firstReadme?.hash).toBe(secondReadme?.hash);
+    expect(first.chunks.every((chunk) => !chunk.path.includes("\\"))).toBe(true);
+  });
+
+  it("preserves boundary whitespace inside chunk text and hash input", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-whitespace-scan-"));
+    writeFileSync(join(workdir, "indented.ts"), "  export const value = 1;\n  \n");
+
+    const first = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const second = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:01:00.000Z"
+    });
+
+    expect(first.chunks[0]).toMatchObject({
+      path: "indented.ts",
+      lineStart: 1,
+      lineEnd: 2,
+      text: "  export const value = 1;\n  \n"
+    });
+    expect(first.chunks[0]?.hash).toBe(second.chunks[0]?.hash);
+  });
+
+  it("keeps terminal newline changes visible in chunk hashes", () => {
+    const withNewline = mkdtempSync(join(tmpdir(), "signal-recycler-newline-scan-"));
+    const withoutNewline = mkdtempSync(join(tmpdir(), "signal-recycler-no-newline-scan-"));
+    writeFileSync(join(withNewline, "file.ts"), "export const value = 1;\n");
+    writeFileSync(join(withoutNewline, "file.ts"), "export const value = 1;");
+
+    const first = scanContextIndex({
+      projectId: "fixture",
+      workdir: withNewline,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const second = scanContextIndex({
+      projectId: "fixture",
+      workdir: withoutNewline,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(first.chunks[0]?.text).toBe("export const value = 1;\n");
+    expect(second.chunks[0]?.text).toBe("export const value = 1;");
+    expect(first.chunks[0]?.hash).not.toBe(second.chunks[0]?.hash);
+  });
+
+  it("preserves original line endings in chunk text and hash input", () => {
+    const crlfWorkdir = mkdtempSync(join(tmpdir(), "signal-recycler-crlf-scan-"));
+    const lfWorkdir = mkdtempSync(join(tmpdir(), "signal-recycler-lf-scan-"));
+    writeFileSync(join(crlfWorkdir, "file.ts"), "const first = 1;\r\nconst second = 2;\r\n");
+    writeFileSync(join(lfWorkdir, "file.ts"), "const first = 1;\nconst second = 2;\n");
+
+    const crlf = scanContextIndex({
+      projectId: "fixture",
+      workdir: crlfWorkdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+    const lf = scanContextIndex({
+      projectId: "fixture",
+      workdir: lfWorkdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(crlf.chunks[0]?.text).toBe("const first = 1;\r\nconst second = 2;\r\n");
+    expect(lf.chunks[0]?.text).toBe("const first = 1;\nconst second = 2;\n");
+    expect(crlf.chunks[0]?.hash).not.toBe(lf.chunks[0]?.hash);
+  });
+
+  it("reports indexable paths even when no chunks are emitted", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-empty-path-scan-"));
+    writeFileSync(join(workdir, "blank.ts"), "  \n\t\n");
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.paths).toEqual(["blank.ts"]);
+    expect(result.chunks).toEqual([]);
+  });
+
+  it("skips files larger than the max file byte limit", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-large-scan-"));
+    writeFileSync(join(workdir, "README.md"), "small docs\n");
+    writeFileSync(join(workdir, "huge.ts"), "x".repeat(64));
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z",
+      maxFileBytes: 32
+    });
+
+    expect(result.chunks.map((chunk) => chunk.path)).toEqual(["README.md"]);
+  });
+
+  it("skips binary-looking files", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-binary-scan-"));
+    mkdirSync(join(workdir, "src"));
+    writeFileSync(join(workdir, "src", "safe.ts"), "export const safe = true;\n");
+    writeFileSync(join(workdir, "src", "binary.ts"), Buffer.from([0x65, 0x78, 0x00, 0x70]));
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.chunks.map((chunk) => chunk.path)).toEqual(["src/safe.ts"]);
+  });
+
+  it("skips unreadable files instead of aborting", () => {
+    if (process.platform === "win32") return;
+
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-unreadable-scan-"));
+    const unreadablePath = join(workdir, "unreadable.ts");
+    writeFileSync(join(workdir, "safe.ts"), "export const safe = true;\n");
+    writeFileSync(unreadablePath, "export const hidden = true;\n");
+    chmodSync(unreadablePath, 0);
+
+    try {
+      const result = scanContextIndex({
+        projectId: "fixture",
+        workdir,
+        indexedAt: "2026-05-14T00:00:00.000Z"
+      });
+
+      expect(result.chunks.map((chunk) => chunk.path)).toEqual(["safe.ts"]);
+      expect(result.errors).toEqual([
+        expect.objectContaining({
+          path: "unreadable.ts",
+          reason: "read_file_failed"
+        })
+      ]);
+    } finally {
+      chmodSync(unreadablePath, 0o600);
+    }
+  });
+
+  it("skips unreadable directories instead of aborting", () => {
+    if (process.platform === "win32") return;
+
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-unreadable-dir-scan-"));
+    const unreadablePath = join(workdir, "private");
+    writeFileSync(join(workdir, "README.md"), "indexed docs\n");
+    mkdirSync(unreadablePath);
+    writeFileSync(join(unreadablePath, "hidden.ts"), "export const hidden = true;\n");
+    chmodSync(unreadablePath, 0);
+
+    try {
+      const result = scanContextIndex({
+        projectId: "fixture",
+        workdir,
+        indexedAt: "2026-05-14T00:00:00.000Z"
+      });
+
+      expect(result.chunks.map((chunk) => chunk.path)).toEqual(["README.md"]);
+      expect(result.errors).toEqual([
+        expect.objectContaining({
+          path: "private",
+          reason: "read_directory_failed"
+        })
+      ]);
+    } finally {
+      chmodSync(unreadablePath, 0o700);
+    }
+  });
+
+  it("reports a missing workdir as a directory read error", () => {
+    const workdir = join(tmpdir(), `signal-recycler-missing-scan-${Date.now()}`);
+
+    const result = scanContextIndex({
+      projectId: "fixture",
+      workdir,
+      indexedAt: "2026-05-14T00:00:00.000Z"
+    });
+
+    expect(result.chunks).toEqual([]);
+    expect(result.paths).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        path: ".",
+        reason: "read_directory_failed"
+      })
+    ]);
+  });
+});

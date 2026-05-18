@@ -15,12 +15,14 @@ describe("event presenters", () => {
       { ...baseEvent, id: "e1", category: "codex_event", title: "Agent message", body: "ok" },
       { ...baseEvent, id: "e2", category: "memory_retrieval", title: "Retrieved", body: "selected" },
       { ...baseEvent, id: "e3", category: "memory_injection", title: "Injected", body: "memory" },
-      { ...baseEvent, id: "e4", category: "compression_result", title: "Compressed", body: "logs" }
+      { ...baseEvent, id: "e4", category: "compression_result", title: "Compressed", body: "logs" },
+      { ...baseEvent, id: "e5", category: "context_retrieval", title: "Retrieved context", body: "source" },
+      { ...baseEvent, id: "e6", category: "context_injection", title: "Injected context", body: "source" }
     ]);
 
     expect(groups.map((group) => [group.id, group.events.map((event) => event.id)])).toEqual([
       ["agent", ["e1"]],
-      ["context", ["e2", "e4"]],
+      ["context", ["e2", "e4", "e5", "e6"]],
       ["memory", ["e3"]]
     ]);
   });

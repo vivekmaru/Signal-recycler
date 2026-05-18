@@ -114,7 +114,7 @@ export function AppShell({
             <div className="mt-1 truncate font-mono">.signal-recycler/{projectName}</div>
           </div>
         </aside>
-        <main className="min-w-0">{children}</main>
+        <main className="min-w-0 overflow-x-auto">{children}</main>
       </div>
     </div>
   );

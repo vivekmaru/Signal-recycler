@@ -1,12 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
 import { renderPlaybookBlock } from "./playbook.js";
 import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { createContextIndexStore } from "./services/contextIndexStore.js";
 import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
 import { createStore } from "./store.js";
@@ -15,6 +16,7 @@ const TEST_APP_OPTIONS = {
   projectId: "test-project",
   workingDirectory: "/tmp/test-project"
 } as const;
+const fixtureContextRepoPath = resolve(process.cwd(), "../../fixtures/context-index-repo");
 
 afterEach(() => {
   vi.useRealTimers();
@@ -595,6 +597,335 @@ describe("api", () => {
     });
   });
 
+  it("reindexes repository context and retrieves source chunks", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const emptyStatus = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(emptyStatus.statusCode).toBe(200);
+    expect(emptyStatus.json()).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: fixtureContextRepoPath,
+      totalChunks: 0,
+      totalFiles: 0,
+      lastIndexedAt: null,
+      bySourceType: []
+    });
+
+    const reindex = await app.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+
+    expect(reindex.statusCode).toBe(200);
+    expect(reindex.json()).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: fixtureContextRepoPath,
+      totalChunks: expect.any(Number),
+      totalFiles: expect.any(Number),
+      lastIndexedAt: expect.any(String)
+    });
+    expect(reindex.json().totalChunks).toBeGreaterThan(0);
+
+    const retrieval = await app.inject({
+      method: "POST",
+      url: "/api/context-index/retrieve",
+      payload: { prompt: "where is auth middleware", limit: 5, sourceTypes: ["source"] }
+    });
+
+    expect(retrieval.statusCode).toBe(200);
+    expect(retrieval.json().selected[0]).toMatchObject({
+      path: "apps/web/src/middleware.ts",
+      sourceType: "source"
+    });
+    expect(retrieval.json().metrics.indexedChunks).toBe(reindex.json().totalChunks);
+
+    const chunkDetail = await app.inject({
+      method: "GET",
+      url: `/api/context-index/chunks/${retrieval.json().selected[0].chunkId}`
+    });
+
+    expect(chunkDetail.statusCode).toBe(200);
+    expect(chunkDetail.json()).toMatchObject({
+      id: retrieval.json().selected[0].chunkId,
+      projectId: TEST_APP_OPTIONS.projectId,
+      path: "apps/web/src/middleware.ts",
+      sourceType: "source",
+      lineStart: expect.any(Number),
+      lineEnd: expect.any(Number),
+      hash: retrieval.json().selected[0].hash,
+      indexedAt: expect.any(String),
+      text: expect.stringContaining("middleware")
+    });
+  });
+
+  it("returns 404 for missing context chunk detail requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/context-index/chunks/ctx_missing"
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({
+      error: "Context chunk not found",
+      message: expect.any(String)
+    });
+  });
+
+  it("returns 400 for malformed context retrieval requests", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/context-index/retrieve",
+      payload: { prompt: "", limit: 5 }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid context retrieval request",
+      message: expect.any(String)
+    });
+  });
+
+  it("does not require context index storage during app startup", async () => {
+    let attempts = 0;
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      },
+      contextIndexStoreFactory: (path) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("no such module: fts5");
+        return createContextIndexStore(path);
+      }
+    });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const status = await app.inject({ method: "GET", url: "/api/context-index/status" });
+    const recoveredStatus = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(health.statusCode).toBe(200);
+    expect(status.statusCode).toBe(503);
+    expect(status.json()).toMatchObject({
+      error: "Context index unavailable",
+      message: expect.stringContaining("fts5")
+    });
+    expect(recoveredStatus.statusCode).toBe(200);
+    expect(attempts).toBe(2);
+  });
+
+  it("normalizes non-error context index storage initialization failures", async () => {
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      },
+      contextIndexStoreFactory: () => {
+        throw "raw context index failure";
+      }
+    });
+
+    const status = await app.inject({ method: "GET", url: "/api/context-index/status" });
+
+    expect(status.statusCode).toBe(503);
+    expect(status.json()).toMatchObject({
+      error: "Context index unavailable",
+      message: "raw context index failure"
+    });
+  });
+
+  it("does not wipe an existing context index when reindex scan fails", async () => {
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-")),
+      "db.sqlite"
+    );
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    const missingWorkdirApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: join(databasePath, "missing-workdir"),
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const failedReindex = await missingWorkdirApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const preservedStatus = await missingWorkdirApp.inject({
+      method: "GET",
+      url: "/api/context-index/status"
+    });
+
+    expect(indexedChunks).toBeGreaterThan(0);
+    expect(failedReindex.statusCode).toBe(422);
+    expect(failedReindex.json()).toMatchObject({
+      error: "Context index scan failed",
+      errors: [
+        expect.objectContaining({
+          path: ".",
+          reason: "read_directory_failed"
+        })
+      ]
+    });
+    expect(preservedStatus.json().totalChunks).toBe(indexedChunks);
+  });
+
+  it("clears an existing context index for a valid empty workdir", async () => {
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-empty-")),
+      "db.sqlite"
+    );
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    const emptyWorkdir = mkdtempSync(join(tmpdir(), "signal-recycler-context-empty-workdir-"));
+    const emptyApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: emptyWorkdir,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const reindex = await emptyApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const status = await emptyApp.inject({
+      method: "GET",
+      url: "/api/context-index/status"
+    });
+
+    expect(indexedChunks).toBeGreaterThan(0);
+    expect(reindex.statusCode).toBe(200);
+    expect(status.json().totalChunks).toBe(0);
+    expect(status.json().totalFiles).toBe(0);
+  });
+
+  it("does not replace an existing context index when reindex partially skips unreadable files", async () => {
+    if (process.platform === "win32") return;
+
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-context-api-partial-")),
+      "db.sqlite"
+    );
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-context-partial-workdir-"));
+    const privateDir = join(workdir, "private");
+    writeFileSync(join(workdir, "README.md"), "indexed docs\n");
+    mkdirSync(privateDir);
+    writeFileSync(join(privateDir, "hidden.ts"), "export const hidden = true;\n");
+
+    const indexedApp = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: workdir,
+      databasePath,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const firstReindex = await indexedApp.inject({
+      method: "POST",
+      url: "/api/context-index/reindex"
+    });
+    const indexedChunks = firstReindex.json().totalChunks;
+    await indexedApp.close();
+
+    chmodSync(privateDir, 0);
+    try {
+      const partialApp = await createApp({
+        ...TEST_APP_OPTIONS,
+        workingDirectory: workdir,
+        databasePath,
+        store: createStore(":memory:"),
+        codexRunner: {
+          run: async () => ({ finalResponse: "ok", items: [] })
+        }
+      });
+      const failedReindex = await partialApp.inject({
+        method: "POST",
+        url: "/api/context-index/reindex"
+      });
+      const preservedStatus = await partialApp.inject({
+        method: "GET",
+        url: "/api/context-index/status"
+      });
+
+      expect(indexedChunks).toBeGreaterThan(1);
+      expect(failedReindex.statusCode).toBe(422);
+      expect(failedReindex.json()).toMatchObject({
+        error: "Context index scan failed",
+        errors: [
+          expect.objectContaining({
+            path: "private",
+            reason: "read_directory_failed"
+          })
+        ]
+      });
+      expect(preservedStatus.json().totalChunks).toBe(indexedChunks);
+      await partialApp.close();
+    } finally {
+      chmodSync(privateDir, 0o700);
+    }
+  });
+
   it("does not include other-project memories in retrieval previews", async () => {
     const store = createStore(":memory:");
     const current = store.approveRule(
@@ -1082,6 +1413,267 @@ describe("api", () => {
       adapter: "codex_cli",
       memoryIds: [rule.id]
     });
+  });
+
+  it("injects indexed source context into owned session adapter runs", async () => {
+    const store = createStore(":memory:");
+    const contextIndexDbPath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-session-context-")),
+      "context.sqlite"
+    );
+    const contextStore = createContextIndexStore(contextIndexDbPath);
+    contextStore.upsertChunks({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: TEST_APP_OPTIONS.workingDirectory,
+      chunks: [
+        {
+          sourceType: "source",
+          path: "apps/api/src/app.ts",
+          lineStart: 10,
+          lineEnd: 18,
+          hash: "hash_session_context_0001",
+          mtimeMs: 1,
+          sizeBytes: 120,
+          text: "The Fastify app registers session routes before context index routes.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        },
+        {
+          sourceType: "docs",
+          path: "README.md",
+          lineStart: 1,
+          lineEnd: 5,
+          hash: "hash_session_readme_0001",
+          mtimeMs: 1,
+          sizeBytes: 120,
+          text: "Signal Recycler manages memory for coding agents.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        }
+      ]
+    });
+    contextStore.close();
+    let capturedPrompt = "";
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      contextIndexDbPath,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "How are session routes registered in the Fastify app?",
+        adapter: "codex_cli"
+      }
+    });
+    const events = store.listEvents(id);
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("<signal-recycler-project-context>");
+    expect(capturedPrompt).toContain("apps/api/src/app.ts:10-18");
+    expect(events.map((event) => event.category)).toEqual(
+      expect.arrayContaining(["context_retrieval", "context_injection"])
+    );
+    expect(events.find((event) => event.category === "context_retrieval")?.metadata).toMatchObject({
+      projectId: TEST_APP_OPTIONS.projectId,
+      query: "How are session routes registered in the Fastify app?",
+      selected: [
+        expect.objectContaining({
+          path: "apps/api/src/app.ts",
+          lineStart: 10,
+          lineEnd: 18
+        })
+      ],
+      metrics: expect.objectContaining({
+        indexedChunks: 2,
+        selectedChunks: 1,
+        skippedChunks: 1
+      })
+    });
+    expect(events.find((event) => event.category === "context_injection")?.metadata).toMatchObject({
+      adapter: "codex_cli",
+      reason: "indexed_project_context",
+      sources: [
+        expect.objectContaining({
+          path: "apps/api/src/app.ts",
+          hash: "hash_session_context_0001"
+        })
+      ]
+    });
+  });
+
+  it("uses the app database path as the owned-session context index fallback", async () => {
+    const store = createStore(":memory:");
+    const databasePath = join(
+      mkdtempSync(join(tmpdir(), "signal-recycler-session-context-fallback-")),
+      "db.sqlite"
+    );
+    const contextStore = createContextIndexStore(databasePath);
+    contextStore.upsertChunks({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir: TEST_APP_OPTIONS.workingDirectory,
+      chunks: [
+        {
+          sourceType: "agent_instructions",
+          path: "AGENTS.md",
+          lineStart: 1,
+          lineEnd: 4,
+          hash: "hash_session_fallback_0001",
+          mtimeMs: 1,
+          sizeBytes: 120,
+          text: "Use pnpm type-check before reporting TypeScript changes.",
+          indexedAt: "2026-05-17T00:00:00.000Z"
+        }
+      ]
+    });
+    contextStore.close();
+    let capturedPrompt = "";
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      databasePath,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Which type-check command should be used?",
+        adapter: "codex_cli"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("Use pnpm type-check before reporting TypeScript changes.");
+    expect(store.listEvents(id).some((event) => event.category === "context_injection")).toBe(true);
+  });
+
+  it("shares the default in-memory context index between reindex and owned session runs", async () => {
+    const store = createStore(":memory:");
+    let capturedPrompt = "";
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      workingDirectory: fixtureContextRepoPath,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_cli: {
+            id: "codex_cli",
+            run: async (input) => {
+              capturedPrompt = input.prompt;
+              return { finalResponse: "codex cli response", items: [{ type: "cli" }] };
+            }
+          }
+        }
+      })
+    });
+    const reindex = await app.inject({ method: "POST", url: "/api/context-index/reindex" });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Which pnpm type-check instruction applies?",
+        adapter: "codex_cli"
+      }
+    });
+
+    expect(reindex.statusCode).toBe(200);
+    expect(response.statusCode).toBe(200);
+    expect(capturedPrompt).toContain("<signal-recycler-project-context>");
+    expect(capturedPrompt).toContain("Use pnpm type-check before reporting TypeScript changes as complete.");
+    expect(store.listEvents(id).some((event) => event.category === "context_injection")).toBe(true);
+  });
+
+  it("does not initialize context index storage for session adapter paths without owned envelopes", async () => {
+    let contextStoreAttempts = 0;
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => {
+          throw new Error("legacy runner should not be used");
+        }
+      },
+      contextIndexStoreFactory: () => {
+        contextStoreAttempts += 1;
+        throw new Error("context index should not be opened");
+      },
+      agentAdapterRegistry: createAgentAdapterRegistry({
+        defaultAdapter: "codex_sdk",
+        adapters: {
+          codex_sdk: {
+            id: "codex_sdk",
+            run: async (input) => ({
+              finalResponse: input.prompt,
+              items: [{ type: "sdk" }]
+            })
+          }
+        }
+      })
+    });
+    const session = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const id = session.json().id;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${id}/run`,
+      payload: {
+        prompt: "Run through Codex SDK compatibility path.",
+        adapter: "codex_sdk"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(contextStoreAttempts).toBe(0);
+    expect(store.listEvents(id).some((event) => event.category === "context_retrieval")).toBe(false);
   });
 
   it("returns a clear error when the Codex CLI adapter is selected before configuration", async () => {

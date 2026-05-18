@@ -7,7 +7,13 @@ import { memoryScopeLabel, memorySourceLabel } from "../lib/memoryPresenters";
 import { buildDashboardMetrics, summarizeSession } from "../lib/sessionPresenters";
 import type { SessionSummary } from "../types";
 
-const contextCategories = new Set(["memory_retrieval", "memory_injection", "compression_result"]);
+const contextCategories = new Set([
+  "memory_retrieval",
+  "memory_injection",
+  "context_retrieval",
+  "context_injection",
+  "compression_result"
+]);
 
 export function DashboardView({
   sessions,

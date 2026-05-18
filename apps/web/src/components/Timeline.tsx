@@ -90,7 +90,12 @@ const TimelineRow = memo(function TimelineRow({
 });
 
 function dotClass(category: TimelineEvent["category"]): string {
-  if (category === "memory_retrieval" || category === "memory_injection") return "bg-sky-500";
+  if (
+    category === "memory_retrieval" ||
+    category === "memory_injection" ||
+    category === "context_retrieval" ||
+    category === "context_injection"
+  ) return "bg-sky-500";
   if (category === "rule_candidate") return "bg-amber-500";
   if (category === "rule_auto_approved" || category === "compression_result") return "bg-green-500";
   return "bg-stone-300";
