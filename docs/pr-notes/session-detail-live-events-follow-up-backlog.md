@@ -11,6 +11,7 @@ Beads:
 - `idea-1-dye`: Session Detail has direct detail-route event polling with active and idle cadences.
 - `idea-1-y7s`: PR #31 review comments addressed for run-error visibility, continued-run scoping, retry loading state, and null-selected active-run coverage.
 - `idea-1-el4`: Second PR #31 review pass addressed run-owner preservation across navigation, populated-timeline resilience during transient poll failures, and overlapping run-active detection.
+- `idea-1-d5f`: Third PR #31 review pass addressed selected-session load-state tracking and empty-session background error handling.
 
 ## P1: Replace Short-Lived SSE With True Event Streaming
 

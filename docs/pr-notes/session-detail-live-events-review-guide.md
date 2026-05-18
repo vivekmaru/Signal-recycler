@@ -31,6 +31,7 @@ The implementation keeps the slice polling-based and local-first. It does not re
 - Preserves the in-flight continued-run owner while navigating between detail pages.
 - Keeps populated timelines visible through transient background poll failures.
 - Treats selected optimistic new-session runs as active even when another continued run is also in flight.
+- Tracks successful detail event loads by selected session id instead of event count, so previous-session events cannot mask first-load failures and empty sessions remain successfully loaded.
 
 ## Reviewer Focus Areas
 

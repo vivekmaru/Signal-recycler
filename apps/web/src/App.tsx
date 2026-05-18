@@ -30,6 +30,7 @@ export function App() {
   const [sessionDetailEvents, setSessionDetailEvents] = useState<TimelineEvent[]>([]);
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const [sessionDetailError, setSessionDetailError] = useState<string | null>(null);
+  const [sessionDetailLoadedSessionId, setSessionDetailLoadedSessionId] = useState<string | null>(null);
   const [sessionDetailReloadKey, setSessionDetailReloadKey] = useState(0);
   const [sessionRunRunning, setSessionRunRunning] = useState(false);
   const [sessionRunSessionId, setSessionRunSessionId] = useState<string | null>(null);
@@ -142,6 +143,7 @@ export function App() {
     if (!selectedSessionIdForDetail) {
       setSessionDetailEvents([]);
       setSessionDetailError(null);
+      setSessionDetailLoadedSessionId(null);
       setSessionDetailLoading(false);
       return;
     }
@@ -149,8 +151,8 @@ export function App() {
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const sessionId = selectedSessionIdForDetail;
-    let initialFetchSettled = sessionDetailEvents.length > 0;
-    let hasLoadedEvents = sessionDetailEvents.length > 0;
+    let initialFetchSettled = sessionDetailLoadedSessionId === sessionId;
+    let hasLoadedSelectedSession = sessionDetailLoadedSessionId === sessionId;
     setSessionDetailError(null);
 
     async function pollEvents() {
@@ -160,12 +162,13 @@ export function App() {
         if (cancelled) return;
         setSessionDetailEvents(events);
         setSessionDetailError(null);
+        setSessionDetailLoadedSessionId(sessionId);
         initialFetchSettled = true;
-        hasLoadedEvents = events.length > 0;
+        hasLoadedSelectedSession = true;
       } catch (error: unknown) {
         if (!cancelled) {
           initialFetchSettled = true;
-          if (!hasLoadedEvents) setSessionDetailError(errorMessage(error));
+          if (!hasLoadedSelectedSession) setSessionDetailError(errorMessage(error));
         }
       } finally {
         if (!cancelled) setSessionDetailLoading(false);
@@ -189,6 +192,7 @@ export function App() {
   useEffect(() => {
     setSessionDetailEvents([]);
     setSessionDetailError(null);
+    setSessionDetailLoadedSessionId(null);
     setSessionDetailLoading(Boolean(selectedSessionIdForDetail));
   }, [selectedSessionIdForDetail]);
 
