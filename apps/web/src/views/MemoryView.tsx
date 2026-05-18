@@ -42,7 +42,7 @@ export function MemoryView({
           if (filter === "superseded") return Boolean(memory.supersededBy);
           return memory.status === filter && !memory.supersededBy;
         })
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+        .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)),
     [filter, memories]
   );
   const selected = visible.find((memory) => memory.id === selectedId) ?? visible[0] ?? null;

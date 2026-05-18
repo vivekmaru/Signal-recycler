@@ -7,9 +7,9 @@ export function summarizeSession(
   events: TimelineEvent[],
   memories: MemoryRecord[] = []
 ): SessionSummary {
-  // `events` should only contain events for the given session.
-  const sessionEvents = [...events]
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const sessionEvents = events
+    .filter((event) => event.sessionId === session.id)
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
   const hasError = sessionEvents.some((event) => event.metadata["phase"] === "codex_error" || /failed/i.test(event.title));
   const hasPendingMemory = memories.some(
     (memory) => memory.status === "pending" && memoryBelongsToSession(memory, session.id, sessionEvents)
