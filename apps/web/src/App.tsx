@@ -5,6 +5,7 @@ import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { useDashboardData } from "./hooks/useDashboardData";
 import { parseAppLocation, pathForRoute } from "./lib/routes";
+import { isSessionDetailRunActive, sessionDetailPollInterval } from "./lib/sessionDetailPolling";
 import { runAdapterOptions } from "./lib/sessionRunPresenters";
 import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
@@ -29,9 +30,12 @@ export function App() {
   const [sessionDetailEvents, setSessionDetailEvents] = useState<TimelineEvent[]>([]);
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const [sessionDetailError, setSessionDetailError] = useState<string | null>(null);
+  const [sessionDetailLoadedSessionId, setSessionDetailLoadedSessionId] = useState<string | null>(null);
   const [sessionDetailReloadKey, setSessionDetailReloadKey] = useState(0);
   const [sessionRunRunning, setSessionRunRunning] = useState(false);
+  const [sessionRunSessionId, setSessionRunSessionId] = useState<string | null>(null);
   const [sessionRunError, setSessionRunError] = useState<string | null>(null);
+  const [sessionRunErrorSessionId, setSessionRunErrorSessionId] = useState<string | null>(null);
 
   const metrics = useMemo(
     () =>
@@ -81,20 +85,25 @@ export function App() {
   async function handleContinueSession(prompt: string, adapter: AgentAdapter) {
     if (!selectedSessionIdForDetail) throw new Error("No selected session is available to continue.");
 
+    const sessionId = selectedSessionIdForDetail;
     setSessionRunRunning(true);
+    setSessionRunSessionId(sessionId);
     setSessionRunError(null);
+    setSessionRunErrorSessionId(null);
     data.setError(null);
 
     try {
-      await runSession(selectedSessionIdForDetail, prompt, adapter);
+      await runSession(sessionId, prompt, adapter);
       await data.refresh();
       setSessionDetailReloadKey((key) => key + 1);
     } catch (continueError: unknown) {
       const message = errorMessage(continueError);
       setSessionRunError(message);
+      setSessionRunErrorSessionId(sessionId);
       throw new Error(message);
     } finally {
       setSessionRunRunning(false);
+      setSessionRunSessionId(null);
     }
   }
 
@@ -117,42 +126,75 @@ export function App() {
     (selectedSessionId ? null : (data.sessions[0] ?? null)) ??
     null;
   const selectedSessionIdForDetail = route === "session" ? (selectedSession?.id ?? null) : null;
-  const selectedSessionFirehoseEventIdentity = selectedSessionIdForDetail
-    ? (data.eventsBySession.get(selectedSessionIdForDetail) ?? [])
-        .map((event) => `${event.id}:${event.createdAt}`)
-        .join("|")
-    : "";
-
+  const sessionDetailRunActive = isSessionDetailRunActive({
+    selectedSessionId: selectedSessionIdForDetail,
+    continuedSessionRunning: sessionRunRunning,
+    continuedSessionId: sessionRunSessionId,
+    newSessionRunning,
+    optimisticSessionId: optimisticSession?.id ?? null
+  });
+  const sessionDetailPollMs = sessionDetailPollInterval({
+    hasSelectedSession: Boolean(selectedSessionIdForDetail),
+    runActive: sessionDetailRunActive
+  });
+  const sessionDetailRunError =
+    sessionRunErrorSessionId === selectedSessionIdForDetail ? sessionRunError : null;
   useEffect(() => {
     if (!selectedSessionIdForDetail) {
       setSessionDetailEvents([]);
       setSessionDetailError(null);
+      setSessionDetailLoadedSessionId(null);
       setSessionDetailLoading(false);
-      setSessionRunError(null);
       return;
     }
 
     let cancelled = false;
-    setSessionDetailEvents([]);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const sessionId = selectedSessionIdForDetail;
+    let initialFetchSettled = sessionDetailLoadedSessionId === sessionId;
+    let hasLoadedSelectedSession = sessionDetailLoadedSessionId === sessionId;
     setSessionDetailError(null);
-    setSessionRunError(null);
-    setSessionDetailLoading(true);
 
-    listEvents(selectedSessionIdForDetail)
-      .then((events) => {
-        if (!cancelled) setSessionDetailEvents(events);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setSessionDetailError(errorMessage(error));
-      })
-      .finally(() => {
+    async function pollEvents() {
+      if (!initialFetchSettled) setSessionDetailLoading(true);
+      try {
+        const events = await listEvents(sessionId);
+        if (cancelled) return;
+        setSessionDetailEvents(events);
+        setSessionDetailError(null);
+        setSessionDetailLoadedSessionId(sessionId);
+        initialFetchSettled = true;
+        hasLoadedSelectedSession = true;
+      } catch (error: unknown) {
+        if (!cancelled) {
+          initialFetchSettled = true;
+          if (!hasLoadedSelectedSession) setSessionDetailError(errorMessage(error));
+        }
+      } finally {
         if (!cancelled) setSessionDetailLoading(false);
-      });
+      }
+
+      if (!cancelled && sessionDetailPollMs !== null) {
+        timeout = setTimeout(() => {
+          void pollEvents();
+        }, sessionDetailPollMs);
+      }
+    }
+
+    void pollEvents();
 
     return () => {
       cancelled = true;
+      if (timeout) clearTimeout(timeout);
     };
-  }, [selectedSessionFirehoseEventIdentity, selectedSessionIdForDetail, sessionDetailReloadKey]);
+  }, [selectedSessionIdForDetail, sessionDetailPollMs, sessionDetailReloadKey]);
+
+  useEffect(() => {
+    setSessionDetailEvents([]);
+    setSessionDetailError(null);
+    setSessionDetailLoadedSessionId(null);
+    setSessionDetailLoading(Boolean(selectedSessionIdForDetail));
+  }, [selectedSessionIdForDetail]);
 
   useEffect(() => {
     function handlePopState() {
@@ -219,8 +261,8 @@ export function App() {
                 onRunPrompt={handleContinueSession}
                 onRetryEvents={() => setSessionDetailReloadKey((key) => key + 1)}
                 onOpenContextChunk={(chunkId) => navigate("context", null, chunkId)}
-                runError={sessionRunError}
-                runRunning={sessionRunRunning}
+                runError={sessionDetailRunError}
+                runRunning={sessionDetailRunActive}
                 session={selectedSession}
               />
             ) : null}
