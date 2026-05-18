@@ -225,7 +225,15 @@ export const contextRetrievalResultSchema = z.object({
   skipped: z.array(
     z.object({
       chunkId: z.string(),
-      reason: z.enum(["not_relevant", "source_type_filter", "project_mismatch"])
+      reason: z.enum([
+        "not_relevant",
+        "source_type_filter",
+        "project_mismatch",
+        "score_below_threshold",
+        "stale_index",
+        "source_unavailable",
+        "budget_exceeded"
+      ])
     })
   ),
   metrics: z.object({

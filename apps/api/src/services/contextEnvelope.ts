@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import {
   type AgentAdapter,
   type ContextChunk,
@@ -11,6 +14,9 @@ import { recordMemoryInjection } from "./memoryInjection.js";
 import { retrieveRelevantMemories } from "./memoryRetrieval.js";
 
 const MAX_CONTEXT_SKIPPED_AUDIT_ENTRIES = 50;
+const DEFAULT_CONTEXT_CHUNK_CHAR_LIMIT = 1200;
+const DEFAULT_CONTEXT_TOTAL_CHAR_LIMIT = 3600;
+const DEFAULT_CONTEXT_MIN_SCORE = 0;
 
 export type ContextEnvelopeInput = {
   store: SignalRecyclerStore;
@@ -19,8 +25,12 @@ export type ContextEnvelopeInput = {
   sessionId: string;
   adapter: AgentAdapter;
   prompt: string;
+  workingDirectory?: string;
   limit?: number;
   contextLimit?: number;
+  contextMinScore?: number;
+  contextMaxChunkChars?: number;
+  contextMaxTotalChars?: number;
 };
 
 export function buildContextEnvelope(input: ContextEnvelopeInput) {
@@ -75,7 +85,11 @@ export function buildContextEnvelope(input: ContextEnvelopeInput) {
     ? buildSourceContextEnvelope({ ...input, contextIndexStore })
     : null;
   if (contextResult) {
-    prompt = injectProjectContext(prompt, contextResult.chunks);
+    prompt = injectProjectContext(
+      prompt,
+      contextResult.chunks,
+      input.contextMaxChunkChars ?? DEFAULT_CONTEXT_CHUNK_CHAR_LIMIT
+    );
   }
   prompt = injectPlaybookRules(prompt, retrieval.memories);
 
@@ -93,17 +107,23 @@ function buildMemoryRetrievalSummary(selected: number, skipped: number): string 
 }
 
 function buildSourceContextEnvelope(input: ContextEnvelopeInput & { contextIndexStore: ContextIndexStore }) {
-  const retrieval = retrieveContextChunks({
+  const rawRetrieval = retrieveContextChunks({
     store: input.contextIndexStore,
     projectId: input.projectId,
     query: input.prompt,
     limit: input.contextLimit ?? 5
   });
-  if (retrieval.metrics.indexedChunks === 0) return null;
+  if (rawRetrieval.metrics.indexedChunks === 0) return null;
 
-  const chunks = retrieval.selected
-    .map((decision) => input.contextIndexStore.getChunk(input.projectId, decision.chunkId))
-    .filter((chunk): chunk is ContextChunk => Boolean(chunk));
+  const { chunks, retrieval } = selectInjectableContextChunks({
+    retrieval: rawRetrieval,
+    contextIndexStore: input.contextIndexStore,
+    projectId: input.projectId,
+    workingDirectory: input.workingDirectory,
+    minScore: input.contextMinScore ?? DEFAULT_CONTEXT_MIN_SCORE,
+    maxChunkChars: input.contextMaxChunkChars ?? DEFAULT_CONTEXT_CHUNK_CHAR_LIMIT,
+    maxTotalChars: input.contextMaxTotalChars ?? DEFAULT_CONTEXT_TOTAL_CHAR_LIMIT
+  });
 
   input.store.createEvent({
     sessionId: input.sessionId,
@@ -153,19 +173,19 @@ function buildContextRetrievalSummary(selected: number, skipped: number): string
   return `Selected ${selected} indexed context chunk${selected === 1 ? "" : "s"}; skipped ${skipped}.`;
 }
 
-function injectProjectContext(prompt: string, chunks: ContextChunk[]): string {
+function injectProjectContext(prompt: string, chunks: ContextChunk[], maxChunkChars: number): string {
   if (chunks.length === 0) return prompt;
   const cleaned = stripProjectContextBlocks(prompt).trimStart();
-  const block = renderProjectContextBlock(chunks);
+  const block = renderProjectContextBlock(chunks, maxChunkChars);
   return `${block}\n\n${cleaned}`.trim();
 }
 
-function renderProjectContextBlock(chunks: ContextChunk[]): string {
+function renderProjectContextBlock(chunks: ContextChunk[], maxChunkChars: number): string {
   const body = chunks
     .map((chunk, index) =>
       [
         `${index + 1}. [${chunk.sourceType}] ${escapeEnvelopeText(formatChunkLocation(chunk))} hash=${escapeEnvelopeText(chunk.hash)}`,
-        escapeEnvelopeText(truncateChunkText(chunk.text))
+        escapeEnvelopeText(truncateChunkText(chunk.text, maxChunkChars))
       ].join("\n")
     )
     .join("\n\n");
@@ -193,10 +213,10 @@ function formatChunkLocation(chunk: Pick<ContextChunk, "path" | "lineStart" | "l
   return `${chunk.path}:${chunk.lineStart}-${chunk.lineEnd}`;
 }
 
-function truncateChunkText(text: string): string {
+function truncateChunkText(text: string, maxChars: number): string {
   const normalized = text.trim();
-  if (normalized.length <= 1200) return normalized;
-  return `${normalized.slice(0, 1200).trimEnd()}\n[truncated]`;
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars).trimEnd()}\n[truncated]`;
 }
 
 function escapeEnvelopeText(text: string): string {
@@ -212,4 +232,99 @@ function buildContextRetrievalAudit(retrieval: ContextRetrievalResult) {
     skippedOmitted: Math.max(0, retrieval.skipped.length - skipped.length),
     metrics: retrieval.metrics
   };
+}
+
+function selectInjectableContextChunks(input: {
+  retrieval: ContextRetrievalResult;
+  contextIndexStore: ContextIndexStore;
+  projectId: string;
+  workingDirectory: string | undefined;
+  minScore: number;
+  maxChunkChars: number;
+  maxTotalChars: number;
+}): { chunks: ContextChunk[]; retrieval: ContextRetrievalResult } {
+  const chunks: ContextChunk[] = [];
+  const selected: ContextRetrievalResult["selected"] = [];
+  const skipped: ContextRetrievalResult["skipped"] = [...input.retrieval.skipped];
+  let usedChars = 0;
+
+  for (const decision of input.retrieval.selected) {
+    if (decision.score < input.minScore) {
+      skipped.push({ chunkId: decision.chunkId, reason: "score_below_threshold" });
+      continue;
+    }
+
+    const chunk = input.contextIndexStore.getChunk(input.projectId, decision.chunkId);
+    if (!chunk) {
+      skipped.push({ chunkId: decision.chunkId, reason: "project_mismatch" });
+      continue;
+    }
+
+    const freshness = checkChunkFreshness(chunk, input.workingDirectory);
+    if (freshness === "stale") {
+      skipped.push({ chunkId: decision.chunkId, reason: "stale_index" });
+      continue;
+    }
+    if (freshness === "unavailable") {
+      skipped.push({ chunkId: decision.chunkId, reason: "source_unavailable" });
+      continue;
+    }
+
+    const chunkChars = Math.min(chunk.text.trim().length, input.maxChunkChars);
+    if (usedChars + chunkChars > input.maxTotalChars) {
+      skipped.push({ chunkId: decision.chunkId, reason: "budget_exceeded" });
+      continue;
+    }
+
+    chunks.push(chunk);
+    selected.push(decision);
+    usedChars += chunkChars;
+  }
+
+  return {
+    chunks,
+    retrieval: {
+      ...input.retrieval,
+      selected,
+      skipped,
+      metrics: {
+        ...input.retrieval.metrics,
+        selectedChunks: selected.length,
+        skippedChunks: skipped.length
+      }
+    }
+  };
+}
+
+function checkChunkFreshness(
+  chunk: Pick<ContextChunk, "path" | "lineStart" | "lineEnd" | "hash">,
+  workingDirectory: string | undefined
+): "fresh" | "stale" | "unavailable" {
+  if (!workingDirectory) return "fresh";
+
+  const workdir = path.resolve(workingDirectory);
+  const absolutePath = path.resolve(workdir, chunk.path);
+  if (absolutePath !== workdir && !absolutePath.startsWith(`${workdir}${path.sep}`)) {
+    return "unavailable";
+  }
+
+  try {
+    statSync(absolutePath);
+    const text = readFileSync(absolutePath, "utf8");
+    const lines = splitLines(text);
+    const selected = lines.slice(chunk.lineStart - 1, chunk.lineEnd).join("");
+    return chunkHash(chunk.path, chunk.lineStart, selected) === chunk.hash ? "fresh" : "stale";
+  } catch {
+    return "unavailable";
+  }
+}
+
+function splitLines(text: string): string[] {
+  const lines = text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) ?? [];
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+function chunkHash(chunkPath: string, lineStart: number, text: string): string {
+  return createHash("sha256").update(`${chunkPath}:${lineStart}:${text}`).digest("hex");
 }

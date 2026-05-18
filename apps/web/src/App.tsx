@@ -17,9 +17,12 @@ import { SessionsView } from "./views/SessionsView";
 
 export function App() {
   const data = useDashboardData();
-  const initialLocation = parseAppLocation(window.location.pathname);
+  const initialLocation = parseAppLocation(`${window.location.pathname}${window.location.search}`);
   const [route, setRoute] = useState<AppRoute>(initialLocation.route);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(initialLocation.sessionId);
+  const [selectedContextChunkId, setSelectedContextChunkId] = useState<string | null>(
+    initialLocation.contextChunkId ?? null
+  );
   const [optimisticSession, setOptimisticSession] = useState<SessionRecord | null>(null);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [newSessionRunning, setNewSessionRunning] = useState(false);
@@ -99,12 +102,13 @@ export function App() {
     navigate(nextRoute, nextRoute === "session" ? selectedSessionId : null);
   }
 
-  function navigate(nextRoute: AppRoute, sessionId?: string | null) {
-    const nextPath = pathForRoute(nextRoute, sessionId);
-    if (window.location.pathname !== nextPath) {
+  function navigate(nextRoute: AppRoute, sessionId?: string | null, contextChunkId?: string | null) {
+    const nextPath = pathForRoute(nextRoute, sessionId, contextChunkId);
+    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
       window.history.pushState(null, "", nextPath);
     }
     setRoute(nextRoute);
+    if (nextRoute === "context") setSelectedContextChunkId(contextChunkId ?? null);
   }
 
   const selectedSession =
@@ -152,9 +156,10 @@ export function App() {
 
   useEffect(() => {
     function handlePopState() {
-      const nextLocation = parseAppLocation(window.location.pathname);
+      const nextLocation = parseAppLocation(`${window.location.pathname}${window.location.search}`);
       setRoute(nextLocation.route);
       if (nextLocation.sessionId) setSelectedSessionId(nextLocation.sessionId);
+      setSelectedContextChunkId(nextLocation.contextChunkId ?? null);
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -213,13 +218,14 @@ export function App() {
                 onBack={() => navigate("sessions")}
                 onRunPrompt={handleContinueSession}
                 onRetryEvents={() => setSessionDetailReloadKey((key) => key + 1)}
+                onOpenContextChunk={(chunkId) => navigate("context", null, chunkId)}
                 runError={sessionRunError}
                 runRunning={sessionRunRunning}
                 session={selectedSession}
               />
             ) : null}
             {route === "memory" ? <MemoryView memories={data.memories} onChanged={data.refresh} /> : null}
-            {route === "context" ? <ContextIndexView /> : null}
+            {route === "context" ? <ContextIndexView selectedChunkId={selectedContextChunkId} /> : null}
             {route === "evals" ? <EvalsView /> : null}
             {route !== "dashboard" &&
             route !== "sessions" &&

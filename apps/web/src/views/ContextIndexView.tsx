@@ -26,7 +26,7 @@ type SubmittedPreview = {
   result: ContextRetrievalPreview;
 };
 
-export function ContextIndexView() {
+export function ContextIndexView({ selectedChunkId: selectedChunkIdFromRoute = null }: { selectedChunkId?: string | null }) {
   const [status, setStatus] = useState<ContextIndexStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -45,6 +45,7 @@ export function ContextIndexView() {
   const requestIdRef = useRef(0);
   const chunkRequestIdRef = useRef(0);
   const promptRef = useRef("");
+  const selectedRouteChunkIdRef = useRef<string | null>(null);
   const sourceFilterKey = selectedSourceTypes.join(",");
   const sourceFilterRef = useRef(sourceFilterKey);
   sourceFilterRef.current = sourceFilterKey;
@@ -94,6 +95,14 @@ export function ContextIndexView() {
   const chunkDetail = useMemo(() => (selectedChunk ? buildContextChunkDetail(selectedChunk) : null), [selectedChunk]);
   const hasPrompt = prompt.trim().length > 0;
   const hasIndex = (status?.totalChunks ?? 0) > 0;
+
+  useEffect(() => {
+    if (selectedChunkIdFromRoute && selectedChunkIdFromRoute !== selectedRouteChunkIdRef.current) {
+      selectedRouteChunkIdRef.current = selectedChunkIdFromRoute;
+      void selectChunk(selectedChunkIdFromRoute);
+    }
+    if (!selectedChunkIdFromRoute) selectedRouteChunkIdRef.current = null;
+  }, [selectedChunkIdFromRoute]);
 
   function handlePromptChange(nextPrompt: string) {
     setPrompt(nextPrompt);
@@ -208,8 +217,8 @@ export function ContextIndexView() {
             </div>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-stone-600">
               Index and inspect repository docs, agent instruction files, package files, config, tests, and selected
-              source chunks. These chunks are separate from durable memory and are not yet injected into owned-session
-              context envelopes.
+              source chunks. These chunks are separate from durable memory and can be injected into owned-session
+              context envelopes when they match the current prompt.
             </p>
           </div>
           <Button disabled={reindexing} onClick={() => void runReindex()} variant="primary">
@@ -380,9 +389,18 @@ export function ContextIndexView() {
           </div>
         ) : (
           <div className="border-t border-stone-200 p-4 text-sm text-stone-500">
-            {hasIndex
-              ? "No source retrieval preview has been requested yet."
-              : "Index this workdir before running source retrieval previews."}
+            {selectedChunkId ? (
+              <ChunkInspector
+                detail={chunkDetail}
+                error={chunkError}
+                loading={chunkLoading}
+                selectedChunkId={selectedChunkId}
+              />
+            ) : hasIndex ? (
+              "No source retrieval preview has been requested yet."
+            ) : (
+              "Index this workdir before running source retrieval previews."
+            )}
           </div>
         )}
       </section>

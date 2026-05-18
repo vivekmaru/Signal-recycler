@@ -35,6 +35,7 @@ export function SessionDetailView({
   runRunning,
   runError,
   onBack,
+  onOpenContextChunk,
   onRunPrompt,
   onRetryEvents
 }: {
@@ -47,6 +48,7 @@ export function SessionDetailView({
   runRunning: boolean;
   runError: string | null;
   onBack: () => void;
+  onOpenContextChunk: (chunkId: string) => void;
   onRunPrompt: (prompt: string, adapter: AgentAdapter) => Promise<void>;
   onRetryEvents: () => void;
 }) {
@@ -230,6 +232,7 @@ export function SessionDetailView({
           {tab === "context" ? (
             <ContextEnvelopePreview
               events={contextEvents}
+              onOpenContextChunk={onOpenContextChunk}
               onSelectEvent={(event) => {
                 setSelectedEventId(event.id);
                 setSelectedMemoryId(null);
@@ -541,9 +544,11 @@ function PreviewDecisionList({
 
 function ContextEnvelopePreview({
   events,
+  onOpenContextChunk,
   onSelectEvent
 }: {
   events: TimelineEvent[];
+  onOpenContextChunk: (chunkId: string) => void;
   onSelectEvent: (event: TimelineEvent) => void;
 }) {
   if (events.length === 0) {
@@ -558,28 +563,37 @@ function ContextEnvelopePreview({
   return (
     <div className="space-y-3">
       {events.map((event) => (
-        <button
-          className="block w-full rounded-md border border-stone-200 bg-white p-4 text-left text-sm hover:bg-stone-50"
-          key={event.id}
-          onClick={() => onSelectEvent(event)}
-          type="button"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Badge tone="blue">{event.category.replaceAll("_", " ")}</Badge>
-              <strong className="truncate text-stone-950">{event.title}</strong>
+        <article className="rounded-md border border-stone-200 bg-white text-sm" key={event.id}>
+          <button
+            className="block w-full p-4 text-left hover:bg-stone-50"
+            onClick={() => onSelectEvent(event)}
+            type="button"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge tone="blue">{event.category.replaceAll("_", " ")}</Badge>
+                <strong className="truncate text-stone-950">{event.title}</strong>
+              </div>
+              <span className="font-mono text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
             </div>
-            <span className="font-mono text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
+            <p className="mt-2 text-stone-600">{event.body || "No event body recorded."}</p>
+          </button>
+          <div className="px-4 pb-4">
+            <ContextMetadata event={event} onOpenContextChunk={onOpenContextChunk} />
           </div>
-          <p className="mt-2 text-stone-600">{event.body || "No event body recorded."}</p>
-          <ContextMetadata event={event} />
-        </button>
+        </article>
       ))}
     </div>
   );
 }
 
-function ContextMetadata({ event }: { event: TimelineEvent }) {
+function ContextMetadata({
+  event,
+  onOpenContextChunk
+}: {
+  event: TimelineEvent;
+  onOpenContextChunk: (chunkId: string) => void;
+}) {
   if (event.category === "memory_retrieval") {
     const selected = metadataRecords(event.metadata["selected"]);
     const skipped = metadataRecords(event.metadata["skipped"]);
@@ -610,8 +624,8 @@ function ContextMetadata({ event }: { event: TimelineEvent }) {
           <MetadataBlock label="Skipped" value={String(skipped.length)} />
           <MetadataBlock label="Limit" value={metadataScalar(metrics["limit"]) ?? "unknown"} />
         </div>
-        <RetrievalDecisionList label="Selected context" records={selected} />
-        <RetrievalDecisionList label="Skipped context" records={skipped} />
+        <RetrievalDecisionList label="Selected context" records={selected} onOpenContextChunk={onOpenContextChunk} />
+        <RetrievalDecisionList label="Skipped context" records={skipped} onOpenContextChunk={onOpenContextChunk} />
       </div>
     );
   }
@@ -641,7 +655,7 @@ function ContextMetadata({ event }: { event: TimelineEvent }) {
             chunkIds.map((id) => <Badge key={id}>{id}</Badge>)
           )}
         </div>
-        <RetrievalDecisionList label="Injected source" records={sources} />
+        <RetrievalDecisionList label="Injected source" records={sources} onOpenContextChunk={onOpenContextChunk} />
       </div>
     );
   }
@@ -745,7 +759,15 @@ function MetadataBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RetrievalDecisionList({ label, records }: { label: string; records: Array<Record<string, unknown>> }) {
+function RetrievalDecisionList({
+  label,
+  records,
+  onOpenContextChunk
+}: {
+  label: string;
+  records: Array<Record<string, unknown>>;
+  onOpenContextChunk?: (chunkId: string) => void;
+}) {
   if (records.length === 0) return null;
 
   return (
@@ -755,9 +777,25 @@ function RetrievalDecisionList({ label, records }: { label: string; records: Arr
         {records.map((record, index) => (
           <div className="min-w-0 text-xs leading-5 text-stone-600" key={`${label}-${index}`}>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="font-mono font-semibold text-stone-900">
-                {metadataScalar(record["memoryId"]) ?? metadataScalar(record["chunkId"]) ?? metadataScalar(record["id"]) ?? "unknown"}
-              </span>
+              {(() => {
+                const contextChunkId = metadataScalar(record["chunkId"]) ?? metadataScalar(record["id"]);
+                return contextChunkId && onOpenContextChunk ? (
+                  <button
+                    className="font-mono font-semibold text-amber-700 underline decoration-amber-300 underline-offset-2 hover:text-amber-900"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenContextChunk(contextChunkId);
+                    }}
+                    type="button"
+                  >
+                    {contextChunkId}
+                  </button>
+                ) : (
+                  <span className="font-mono font-semibold text-stone-900">
+                    {metadataScalar(record["memoryId"]) ?? contextChunkId ?? "unknown"}
+                  </span>
+                );
+              })()}
               {metadataScalar(record["rank"]) ? <Badge>rank {metadataScalar(record["rank"])}</Badge> : null}
               {metadataScalar(record["score"]) ? <Badge>score {metadataScalar(record["score"])}</Badge> : null}
               {metadataScalar(record["reason"]) ? <Badge tone="amber">{metadataScalar(record["reason"])}</Badge> : null}
