@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scanContextIndex } from "./contextIndexScanner.js";
 
-const fixtureRoot = resolve(process.cwd(), "../../fixtures/context-index-repo");
+const fixtureRoot = resolve(__dirname, "../../../../fixtures/context-index-repo");
 
 describe("context index scanner", () => {
   it("indexes docs, agent instructions, package files, config, source, and tests", () => {

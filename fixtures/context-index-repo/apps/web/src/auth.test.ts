@@ -1,3 +1,4 @@
+import { test, expect } from "vitest";
 import { readSessionCookie } from "./auth";
 
 test("reads session cookie", () => {

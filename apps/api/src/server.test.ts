@@ -17,7 +17,7 @@ const TEST_APP_OPTIONS = {
   projectId: "test-project",
   workingDirectory: "/tmp/test-project"
 } as const;
-const fixtureContextRepoPath = resolve(process.cwd(), "../../fixtures/context-index-repo");
+const fixtureContextRepoPath = resolve(__dirname, "../../../fixtures/context-index-repo");
 
 afterEach(() => {
   vi.useRealTimers();
