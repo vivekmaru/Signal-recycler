@@ -66,7 +66,21 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     }
   });
 
-  await app.register(cors, { origin: true });
+  const dashboardUrl = process.env.SIGNAL_RECYCLER_DASHBOARD_URL ?? "http://127.0.0.1:5173";
+  const allowedOrigins = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    dashboardUrl
+  ];
+  await app.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Not allowed by CORS"), false);
+    }
+  });
 
   app.addHook("onRequest", async (request) => {
     if (!request.url.startsWith("/proxy/")) return;
