@@ -32,16 +32,16 @@ export function DashboardView({
 }) {
   const metrics = buildDashboardMetrics({ sessions, events, memories });
   const recentSessions = [...sessions]
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, 5)
     .map((session) => summarizeSession(session, eventsBySession.get(session.id) ?? [], memories));
   const pendingMemories = memories
     .filter((memory) => memory.status === "pending")
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, 4);
   const contextEvents = events
     .filter((event) => contextCategories.has(event.category))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, 6);
 
   return (

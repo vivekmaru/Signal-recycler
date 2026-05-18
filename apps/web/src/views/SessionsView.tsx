@@ -25,7 +25,7 @@ export function SessionsView({
   const summaries = useMemo(
     () =>
       [...sessions]
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
         .map((session) => summarizeSession(session, eventsBySession.get(session.id) ?? [], memories)),
     [eventsBySession, memories, sessions]
   );
