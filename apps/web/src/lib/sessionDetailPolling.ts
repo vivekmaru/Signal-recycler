@@ -19,8 +19,8 @@ export function isSessionDetailRunActive(input: {
   optimisticSessionId: string | null;
 }): boolean {
   if (!input.selectedSessionId) return false;
-  if (input.continuedSessionRunning) {
-    return input.selectedSessionId === input.continuedSessionId;
-  }
-  return input.newSessionRunning && input.selectedSessionId === input.optimisticSessionId;
+  const continuedRunActive =
+    input.continuedSessionRunning && input.selectedSessionId === input.continuedSessionId;
+  const newRunActive = input.newSessionRunning && input.selectedSessionId === input.optimisticSessionId;
+  return continuedRunActive || newRunActive;
 }

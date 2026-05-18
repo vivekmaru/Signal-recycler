@@ -79,4 +79,16 @@ describe("session detail polling", () => {
       })
     ).toBe(false);
   });
+
+  it("treats a selected optimistic new session as active during another continued run", () => {
+    expect(
+      isSessionDetailRunActive({
+        selectedSessionId: "session_new",
+        continuedSessionRunning: true,
+        continuedSessionId: "session_1",
+        newSessionRunning: true,
+        optimisticSessionId: "session_new"
+      })
+    ).toBe(true);
+  });
 });

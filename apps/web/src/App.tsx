@@ -143,9 +143,6 @@ export function App() {
       setSessionDetailEvents([]);
       setSessionDetailError(null);
       setSessionDetailLoading(false);
-      setSessionRunSessionId(null);
-      setSessionRunError(null);
-      setSessionRunErrorSessionId(null);
       return;
     }
 
@@ -153,6 +150,7 @@ export function App() {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const sessionId = selectedSessionIdForDetail;
     let initialFetchSettled = sessionDetailEvents.length > 0;
+    let hasLoadedEvents = sessionDetailEvents.length > 0;
     setSessionDetailError(null);
 
     async function pollEvents() {
@@ -163,10 +161,11 @@ export function App() {
         setSessionDetailEvents(events);
         setSessionDetailError(null);
         initialFetchSettled = true;
+        hasLoadedEvents = events.length > 0;
       } catch (error: unknown) {
         if (!cancelled) {
           initialFetchSettled = true;
-          setSessionDetailError(errorMessage(error));
+          if (!hasLoadedEvents) setSessionDetailError(errorMessage(error));
         }
       } finally {
         if (!cancelled) setSessionDetailLoading(false);
@@ -191,9 +190,6 @@ export function App() {
     setSessionDetailEvents([]);
     setSessionDetailError(null);
     setSessionDetailLoading(Boolean(selectedSessionIdForDetail));
-    setSessionRunError(null);
-    setSessionRunErrorSessionId(null);
-    setSessionRunSessionId(null);
   }, [selectedSessionIdForDetail]);
 
   useEffect(() => {

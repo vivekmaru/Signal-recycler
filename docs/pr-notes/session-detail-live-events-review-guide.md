@@ -28,6 +28,9 @@ The implementation keeps the slice polling-based and local-first. It does not re
 - Keeps repeated event-fetch retry errors visible instead of re-entering loading state on every automatic retry.
 - Adds explicit helper coverage for `selectedSessionId: null` while run flags are true.
 - Associates continued-run errors with the source session before rendering them in Session Detail.
+- Preserves the in-flight continued-run owner while navigating between detail pages.
+- Keeps populated timelines visible through transient background poll failures.
+- Treats selected optimistic new-session runs as active even when another continued run is also in flight.
 
 ## Reviewer Focus Areas
 
@@ -46,11 +49,11 @@ The implementation keeps the slice polling-based and local-first. It does not re
 ## Verification Commands And Results
 
 - `pnpm --filter @signal-recycler/web test -- sessionDetailPolling.test.ts`
-  - Result: passed, 9 files / 47 tests.
+  - Result: passed, 9 files / 48 tests.
 - `pnpm --filter @signal-recycler/web type-check`
   - Result: passed.
 - `pnpm test`
-  - Result: passed, CLI 32 tests, API 201 tests, Web 47 tests.
+  - Result: passed, CLI 32 tests, API 201 tests, Web 48 tests.
 - `pnpm type-check`
   - Result: passed across CLI, shared, API, and Web.
 - `pnpm build`
