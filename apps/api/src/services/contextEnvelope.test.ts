@@ -1,9 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createStore } from "../store.js";
 import { buildContextEnvelope } from "./contextEnvelope.js";
+import { scanContextIndex } from "./contextIndexScanner.js";
 import { createContextIndexStore } from "./contextIndexStore.js";
 
 function createContextStoreWithChunks() {
@@ -281,6 +282,140 @@ describe("context envelope", () => {
           })
         ]
       }
+    });
+  });
+
+  it("skips stale indexed chunks before source context injection", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "ctx-envelope-stale-"));
+    writeFileSync(
+      join(workdir, "README.md"),
+      "The Fastify app registers session routes before context index routes.\n"
+    );
+    const scanned = scanContextIndex({
+      projectId: "demo",
+      workdir,
+      indexedAt: "2026-05-17T00:00:00.000Z"
+    });
+    const contextIndexStore = createContextIndexStore(join(workdir, "context.sqlite"));
+    contextIndexStore.upsertChunks({
+      projectId: "demo",
+      workdir,
+      chunks: scanned.chunks.map(({ projectId: _projectId, ...chunk }) => chunk)
+    });
+    writeFileSync(join(workdir, "README.md"), "The session route setup moved to a new module.\n");
+    const store = createStore(":memory:");
+
+    const result = buildContextEnvelope({
+      store,
+      contextIndexStore,
+      projectId: "demo",
+      sessionId: "session-stale-source-context",
+      adapter: "mock",
+      prompt: "How are session routes registered in the Fastify app?",
+      workingDirectory: workdir
+    });
+    const events = store.listEvents("session-stale-source-context");
+
+    expect(result.prompt).not.toContain("<signal-recycler-project-context>");
+    expect(result.contextChunkIds).toEqual([]);
+    expect(result.contextRetrieval).toMatchObject({
+      selected: [],
+      skipped: [expect.objectContaining({ reason: "stale_index" })],
+      metrics: expect.objectContaining({
+        selectedChunks: 0,
+        skippedChunks: 1
+      })
+    });
+    expect(events.map((event) => event.category)).toEqual([
+      "memory_retrieval",
+      "context_retrieval"
+    ]);
+    expect(events.find((event) => event.category === "context_injection")).toBeUndefined();
+  });
+
+  it("keeps live chunks fresh when the indexed hash still matches the workdir file", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "ctx-envelope-fresh-"));
+    writeFileSync(
+      join(workdir, "README.md"),
+      "The Fastify app registers session routes before context index routes.\n"
+    );
+    const scanned = scanContextIndex({
+      projectId: "demo",
+      workdir,
+      indexedAt: "2026-05-17T00:00:00.000Z"
+    });
+    const contextIndexStore = createContextIndexStore(join(workdir, "context.sqlite"));
+    contextIndexStore.upsertChunks({
+      projectId: "demo",
+      workdir,
+      chunks: scanned.chunks.map(({ projectId: _projectId, ...chunk }) => chunk)
+    });
+    const store = createStore(":memory:");
+
+    const result = buildContextEnvelope({
+      store,
+      contextIndexStore,
+      projectId: "demo",
+      sessionId: "session-fresh-source-context",
+      adapter: "mock",
+      prompt: "How are session routes registered in the Fastify app?",
+      workingDirectory: workdir
+    });
+
+    expect(result.prompt).toContain("<signal-recycler-project-context>");
+    expect(result.contextChunkIds).toHaveLength(1);
+    expect(result.contextRetrieval?.selected).toEqual([
+      expect.objectContaining({ path: "README.md" })
+    ]);
+  });
+
+  it("skips low-score context hits below the configured source context threshold", () => {
+    const store = createStore(":memory:");
+    const contextIndexStore = createContextStoreWithChunks();
+
+    const result = buildContextEnvelope({
+      store,
+      contextIndexStore,
+      projectId: "demo",
+      sessionId: "session-source-score-threshold",
+      adapter: "mock",
+      prompt: "How are session routes registered in the Fastify app?",
+      contextLimit: 2,
+      contextMinScore: 999
+    });
+
+    expect(result.prompt).not.toContain("<signal-recycler-project-context>");
+    expect(result.contextChunkIds).toEqual([]);
+    expect(result.contextRetrieval).toMatchObject({
+      selected: [],
+      skipped: expect.arrayContaining([expect.objectContaining({ reason: "score_below_threshold" })]),
+      metrics: expect.objectContaining({ selectedChunks: 0 })
+    });
+  });
+
+  it("enforces a total source context character budget before injection", () => {
+    const store = createStore(":memory:");
+    const contextIndexStore = createContextStoreWithChunks();
+
+    const result = buildContextEnvelope({
+      store,
+      contextIndexStore,
+      projectId: "demo",
+      sessionId: "session-source-total-budget",
+      adapter: "mock",
+      prompt: "Fastify app session routes local control plane",
+      contextLimit: 2,
+      contextMaxTotalChars: 70
+    });
+
+    expect(result.contextChunkIds).toHaveLength(1);
+    expect(result.contextRetrieval).toMatchObject({
+      selected: [expect.objectContaining({ path: "apps/api/src/app.ts" })],
+      skipped: expect.arrayContaining([expect.objectContaining({ reason: "budget_exceeded" })]),
+      metrics: expect.objectContaining({
+        selectedChunks: 1,
+        skippedChunks: 1
+      })
     });
   });
 

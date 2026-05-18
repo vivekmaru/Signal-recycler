@@ -7,6 +7,7 @@ import { createApp } from "./app.js";
 import { createCodexRunner } from "./codexRunner.js";
 import { renderPlaybookBlock } from "./playbook.js";
 import { createAgentAdapterRegistry } from "./services/agentAdapters.js";
+import { scanContextIndex } from "./services/contextIndexScanner.js";
 import { createContextIndexStore } from "./services/contextIndexStore.js";
 import { createCodexSdkAdapter } from "./services/codexSdkAdapter.js";
 import { recordMemoryInjection } from "./services/memoryInjection.js";
@@ -1417,6 +1418,29 @@ describe("api", () => {
 
   it("injects indexed source context into owned session adapter runs", async () => {
     const store = createStore(":memory:");
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-session-context-workdir-"));
+    mkdirSync(join(workdir, "apps/api/src"), { recursive: true });
+    writeFileSync(
+      join(workdir, "apps/api/src/app.ts"),
+      [
+        "import Fastify from 'fastify';",
+        "",
+        "export function createApp() {",
+        "  const app = Fastify();",
+        "  app.register(sessionRoutes);",
+        "}",
+        "",
+        "const sessionRoutes = {};",
+        "",
+        "The Fastify app registers session routes before context index routes."
+      ].join("\n")
+    );
+    writeFileSync(join(workdir, "README.md"), "Signal Recycler manages memory for coding agents.\n");
+    const scanned = scanContextIndex({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir,
+      indexedAt: "2026-05-17T00:00:00.000Z"
+    });
     const contextIndexDbPath = join(
       mkdtempSync(join(tmpdir(), "signal-recycler-session-context-")),
       "context.sqlite"
@@ -1424,36 +1448,14 @@ describe("api", () => {
     const contextStore = createContextIndexStore(contextIndexDbPath);
     contextStore.upsertChunks({
       projectId: TEST_APP_OPTIONS.projectId,
-      workdir: TEST_APP_OPTIONS.workingDirectory,
-      chunks: [
-        {
-          sourceType: "source",
-          path: "apps/api/src/app.ts",
-          lineStart: 10,
-          lineEnd: 18,
-          hash: "hash_session_context_0001",
-          mtimeMs: 1,
-          sizeBytes: 120,
-          text: "The Fastify app registers session routes before context index routes.",
-          indexedAt: "2026-05-17T00:00:00.000Z"
-        },
-        {
-          sourceType: "docs",
-          path: "README.md",
-          lineStart: 1,
-          lineEnd: 5,
-          hash: "hash_session_readme_0001",
-          mtimeMs: 1,
-          sizeBytes: 120,
-          text: "Signal Recycler manages memory for coding agents.",
-          indexedAt: "2026-05-17T00:00:00.000Z"
-        }
-      ]
+      workdir,
+      chunks: scanned.chunks.map(({ projectId: _projectId, ...chunk }) => chunk)
     });
     contextStore.close();
     let capturedPrompt = "";
     const app = await createApp({
       ...TEST_APP_OPTIONS,
+      workingDirectory: workdir,
       contextIndexDbPath,
       store,
       codexRunner: {
@@ -1489,7 +1491,7 @@ describe("api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(capturedPrompt).toContain("<signal-recycler-project-context>");
-    expect(capturedPrompt).toContain("apps/api/src/app.ts:10-18");
+    expect(capturedPrompt).toContain("apps/api/src/app.ts:1-10");
     expect(events.map((event) => event.category)).toEqual(
       expect.arrayContaining(["context_retrieval", "context_injection"])
     );
@@ -1499,8 +1501,8 @@ describe("api", () => {
       selected: [
         expect.objectContaining({
           path: "apps/api/src/app.ts",
-          lineStart: 10,
-          lineEnd: 18
+          lineStart: 1,
+          lineEnd: 10
         })
       ],
       metrics: expect.objectContaining({
@@ -1515,7 +1517,7 @@ describe("api", () => {
       sources: [
         expect.objectContaining({
           path: "apps/api/src/app.ts",
-          hash: "hash_session_context_0001"
+          hash: expect.stringMatching(/^[a-f0-9]{64}$/)
         })
       ]
     });
@@ -1523,6 +1525,13 @@ describe("api", () => {
 
   it("uses the app database path as the owned-session context index fallback", async () => {
     const store = createStore(":memory:");
+    const workdir = mkdtempSync(join(tmpdir(), "signal-recycler-session-context-fallback-workdir-"));
+    writeFileSync(join(workdir, "AGENTS.md"), "Use pnpm type-check before reporting TypeScript changes.\n");
+    const scanned = scanContextIndex({
+      projectId: TEST_APP_OPTIONS.projectId,
+      workdir,
+      indexedAt: "2026-05-17T00:00:00.000Z"
+    });
     const databasePath = join(
       mkdtempSync(join(tmpdir(), "signal-recycler-session-context-fallback-")),
       "db.sqlite"
@@ -1530,25 +1539,14 @@ describe("api", () => {
     const contextStore = createContextIndexStore(databasePath);
     contextStore.upsertChunks({
       projectId: TEST_APP_OPTIONS.projectId,
-      workdir: TEST_APP_OPTIONS.workingDirectory,
-      chunks: [
-        {
-          sourceType: "agent_instructions",
-          path: "AGENTS.md",
-          lineStart: 1,
-          lineEnd: 4,
-          hash: "hash_session_fallback_0001",
-          mtimeMs: 1,
-          sizeBytes: 120,
-          text: "Use pnpm type-check before reporting TypeScript changes.",
-          indexedAt: "2026-05-17T00:00:00.000Z"
-        }
-      ]
+      workdir,
+      chunks: scanned.chunks.map(({ projectId: _projectId, ...chunk }) => chunk)
     });
     contextStore.close();
     let capturedPrompt = "";
     const app = await createApp({
       ...TEST_APP_OPTIONS,
+      workingDirectory: workdir,
       databasePath,
       store,
       codexRunner: {

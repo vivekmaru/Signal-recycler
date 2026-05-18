@@ -147,6 +147,8 @@ async function runAgentAdapter(
         sessionId: input.sessionId,
         adapter: adapter.id,
         prompt: input.prompt,
+        ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
+        ...readSourceContextEnvelopeConfig(),
         ...(contextIndexStore ? { contextIndexStore } : {})
       }).prompt
     : input.prompt;
@@ -160,6 +162,51 @@ async function runAgentAdapter(
 
 function shouldBuildContextEnvelope(adapter: AgentAdapter): boolean {
   return adapter.id === "mock" || adapter.id === "codex_cli";
+}
+
+function readSourceContextEnvelopeConfig(): {
+  contextLimit?: number;
+  contextMinScore?: number;
+  contextMaxChunkChars?: number;
+  contextMaxTotalChars?: number;
+} {
+  return {
+    ...optionalPositiveInteger("SIGNAL_RECYCLER_CONTEXT_LIMIT", process.env.SIGNAL_RECYCLER_CONTEXT_LIMIT),
+    ...optionalNonnegativeNumber("SIGNAL_RECYCLER_CONTEXT_MIN_SCORE", process.env.SIGNAL_RECYCLER_CONTEXT_MIN_SCORE),
+    ...optionalPositiveInteger(
+      "SIGNAL_RECYCLER_CONTEXT_CHUNK_CHAR_LIMIT",
+      process.env.SIGNAL_RECYCLER_CONTEXT_CHUNK_CHAR_LIMIT
+    ),
+    ...optionalPositiveInteger(
+      "SIGNAL_RECYCLER_CONTEXT_TOTAL_CHAR_LIMIT",
+      process.env.SIGNAL_RECYCLER_CONTEXT_TOTAL_CHAR_LIMIT
+    )
+  };
+}
+
+function optionalPositiveInteger(key: string, value: string | undefined) {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return {};
+  const normalized = Math.floor(parsed);
+  switch (key) {
+    case "SIGNAL_RECYCLER_CONTEXT_LIMIT":
+      return { contextLimit: normalized };
+    case "SIGNAL_RECYCLER_CONTEXT_CHUNK_CHAR_LIMIT":
+      return { contextMaxChunkChars: normalized };
+    case "SIGNAL_RECYCLER_CONTEXT_TOTAL_CHAR_LIMIT":
+      return { contextMaxTotalChars: normalized };
+    default:
+      return {};
+  }
+}
+
+function optionalNonnegativeNumber(key: string, value: string | undefined) {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return {};
+  if (key === "SIGNAL_RECYCLER_CONTEXT_MIN_SCORE") return { contextMinScore: parsed };
+  return {};
 }
 
 function isCoveredByApprovedMemory(candidate: CandidateRule, memories: MemoryRecord[]): boolean {

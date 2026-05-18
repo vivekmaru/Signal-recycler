@@ -3,6 +3,7 @@ import type { AppRoute } from "../types";
 export type ParsedAppLocation = {
   route: AppRoute;
   sessionId: string | null;
+  contextChunkId?: string | null;
 };
 
 const ROUTE_PATHS: Record<Exclude<AppRoute, "session">, string> = {
@@ -16,7 +17,8 @@ const ROUTE_PATHS: Record<Exclude<AppRoute, "session">, string> = {
 };
 
 export function parseAppLocation(pathname: string): ParsedAppLocation {
-  const normalized = normalizePath(pathname);
+  const [rawPathname = "/", rawSearch = ""] = pathname.split("?", 2);
+  const normalized = normalizePath(rawPathname);
   const sessionMatch = normalized.match(/^\/sessions\/([^/]+)$/);
   if (sessionMatch) {
     const sessionId = safeDecodeURIComponent(sessionMatch[1] ?? "");
@@ -27,12 +29,23 @@ export function parseAppLocation(pathname: string): ParsedAppLocation {
     ([, path]) => path === normalized
   )?.[0];
 
+  if (route === "context") {
+    return {
+      route,
+      sessionId: null,
+      contextChunkId: parseContextChunkId(rawSearch)
+    };
+  }
+
   return { route: route ?? "dashboard", sessionId: null };
 }
 
-export function pathForRoute(route: AppRoute, sessionId?: string | null): string {
+export function pathForRoute(route: AppRoute, sessionId?: string | null, contextChunkId?: string | null): string {
   if (route === "session") {
     return sessionId ? `/sessions/${encodeURIComponent(sessionId)}` : "/sessions";
+  }
+  if (route === "context" && contextChunkId) {
+    return `${ROUTE_PATHS[route]}?chunk=${encodeURIComponent(contextChunkId)}`;
   }
   return ROUTE_PATHS[route];
 }
@@ -48,4 +61,10 @@ function safeDecodeURIComponent(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function parseContextChunkId(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const chunk = params.get("chunk");
+  return chunk?.trim() || null;
 }
