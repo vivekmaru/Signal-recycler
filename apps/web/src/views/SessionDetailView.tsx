@@ -563,20 +563,24 @@ function ContextEnvelopePreview({
   return (
     <div className="space-y-3">
       {events.map((event) => (
-        <article
-          className="block w-full rounded-md border border-stone-200 bg-white p-4 text-left text-sm hover:bg-stone-50"
-          key={event.id}
-          onClick={() => onSelectEvent(event)}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Badge tone="blue">{event.category.replaceAll("_", " ")}</Badge>
-              <strong className="truncate text-stone-950">{event.title}</strong>
+        <article className="rounded-md border border-stone-200 bg-white text-sm" key={event.id}>
+          <button
+            className="block w-full p-4 text-left hover:bg-stone-50"
+            onClick={() => onSelectEvent(event)}
+            type="button"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge tone="blue">{event.category.replaceAll("_", " ")}</Badge>
+                <strong className="truncate text-stone-950">{event.title}</strong>
+              </div>
+              <span className="font-mono text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
             </div>
-            <span className="font-mono text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
+            <p className="mt-2 text-stone-600">{event.body || "No event body recorded."}</p>
+          </button>
+          <div className="px-4 pb-4">
+            <ContextMetadata event={event} onOpenContextChunk={onOpenContextChunk} />
           </div>
-          <p className="mt-2 text-stone-600">{event.body || "No event body recorded."}</p>
-          <ContextMetadata event={event} onOpenContextChunk={onOpenContextChunk} />
         </article>
       ))}
     </div>

@@ -45,6 +45,7 @@ export function ContextIndexView({ selectedChunkId: selectedChunkIdFromRoute = n
   const requestIdRef = useRef(0);
   const chunkRequestIdRef = useRef(0);
   const promptRef = useRef("");
+  const selectedRouteChunkIdRef = useRef<string | null>(null);
   const sourceFilterKey = selectedSourceTypes.join(",");
   const sourceFilterRef = useRef(sourceFilterKey);
   sourceFilterRef.current = sourceFilterKey;
@@ -96,10 +97,12 @@ export function ContextIndexView({ selectedChunkId: selectedChunkIdFromRoute = n
   const hasIndex = (status?.totalChunks ?? 0) > 0;
 
   useEffect(() => {
-    if (selectedChunkIdFromRoute && selectedChunkIdFromRoute !== selectedChunkId) {
+    if (selectedChunkIdFromRoute && selectedChunkIdFromRoute !== selectedRouteChunkIdRef.current) {
+      selectedRouteChunkIdRef.current = selectedChunkIdFromRoute;
       void selectChunk(selectedChunkIdFromRoute);
     }
-  }, [selectedChunkIdFromRoute, selectedChunkId]);
+    if (!selectedChunkIdFromRoute) selectedRouteChunkIdRef.current = null;
+  }, [selectedChunkIdFromRoute]);
 
   function handlePromptChange(nextPrompt: string) {
     setPrompt(nextPrompt);

@@ -419,6 +419,33 @@ describe("context envelope", () => {
     });
   });
 
+  it("applies the total source context character budget to the first chunk", () => {
+    const store = createStore(":memory:");
+    const contextIndexStore = createContextStoreWithChunks();
+
+    const result = buildContextEnvelope({
+      store,
+      contextIndexStore,
+      projectId: "demo",
+      sessionId: "session-source-first-chunk-budget",
+      adapter: "mock",
+      prompt: "How are session routes registered in the Fastify app?",
+      contextLimit: 2,
+      contextMaxTotalChars: 10
+    });
+
+    expect(result.prompt).not.toContain("<signal-recycler-project-context>");
+    expect(result.contextChunkIds).toEqual([]);
+    expect(result.contextRetrieval).toMatchObject({
+      selected: [],
+      skipped: expect.arrayContaining([expect.objectContaining({ reason: "budget_exceeded" })]),
+      metrics: expect.objectContaining({
+        selectedChunks: 0,
+        skippedChunks: 2
+      })
+    });
+  });
+
   it("does not emit source context events when the context index is empty", () => {
     const store = createStore(":memory:");
     const contextIndexStore = createContextIndexStore(

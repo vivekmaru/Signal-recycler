@@ -271,7 +271,7 @@ function selectInjectableContextChunks(input: {
     }
 
     const chunkChars = Math.min(chunk.text.trim().length, input.maxChunkChars);
-    if (chunks.length > 0 && usedChars + chunkChars > input.maxTotalChars) {
+    if (usedChars + chunkChars > input.maxTotalChars) {
       skipped.push({ chunkId: decision.chunkId, reason: "budget_exceeded" });
       continue;
     }

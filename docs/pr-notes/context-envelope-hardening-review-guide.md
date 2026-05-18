@@ -34,6 +34,13 @@ The slice keeps Phase 5 boundaries intact. Indexed source/doc chunks stay separa
 - Adds `/context-index?chunk=<id>` parsing and route building.
 - Lets Session Detail source context records open the Context Index chunk inspector.
 - Lets Context Index load a chunk inspector directly from the route.
+- Preserves keyboard-operable context event selection while keeping chunk links separate from the event card button.
+
+### PR Review Follow-Up
+
+- Applies the total context budget to the first selected chunk, not only subsequent chunks.
+- Ensures a route-selected chunk opens once and does not override later manual chunk inspector selections.
+- Restores context event card keyboard activation after the deep-link UI change.
 
 ## Reviewer Focus Areas
 
@@ -54,12 +61,14 @@ The slice keeps Phase 5 boundaries intact. Indexed source/doc chunks stay separa
 
 - `pnpm --filter @signal-recycler/api test -- contextEnvelope.test.ts server.test.ts`
   - Result: passed, 22 files / 200 tests.
+- `pnpm --filter @signal-recycler/api test -- contextEnvelope.test.ts`
+  - Result: passed, 22 files / 201 tests.
 - `pnpm --filter @signal-recycler/web test -- routes.test.ts`
   - Result: passed, 8 files / 40 tests.
-- `pnpm test`
-  - Result: passed, CLI 32 tests, API 200 tests, Web 40 tests.
 - `pnpm --filter @signal-recycler/web type-check`
   - Result: passed.
+- `pnpm test`
+  - Result: passed, CLI 32 tests, API 201 tests, Web 40 tests.
 - `pnpm type-check`
   - Result: passed across CLI, shared, API, and Web.
 - `pnpm build`
