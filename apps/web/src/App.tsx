@@ -42,9 +42,10 @@ export function App() {
       buildDashboardMetrics({
         sessions: data.sessions,
         events: data.events,
+        eventsBySession: data.eventsBySession,
         memories: data.memories
       }),
-    [data.events, data.memories, data.sessions]
+    [data.events, data.eventsBySession, data.memories, data.sessions]
   );
 
   const counts = useMemo(
