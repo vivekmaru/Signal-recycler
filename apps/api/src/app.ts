@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerContextIndexRoutes } from "./routes/contextIndex.js";
 import { registerDemoRoutes } from "./routes/demo.js";
+import { registerEvalRoutes } from "./routes/evals.js";
 import {
   registerProxyRoutes,
   REQUEST_ENTITY_HEADERS_TO_DROP_BEFORE_PARSE
@@ -23,6 +24,7 @@ type AppOptions = {
   databasePath?: string;
   contextIndexDbPath?: string;
   contextIndexStoreFactory?: (path: string) => ContextIndexStore;
+  evalReportDir?: string;
   upstreamBaseUrl?: string;
   agentAdapterRegistry?: ReturnType<typeof createAgentAdapterRegistry>;
 };
@@ -95,6 +97,9 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   await registerSessionRoutes(app, { ...options, contextIndexStore });
   await registerDemoRoutes(app, options);
   await registerRuleRoutes(app, options);
+  await registerEvalRoutes(app, {
+    evalReportDir: options.evalReportDir ?? path.join(workingDirectory, ".signal-recycler/evals")
+  });
   await registerContextIndexRoutes(app, {
     projectId,
     workingDirectory,
