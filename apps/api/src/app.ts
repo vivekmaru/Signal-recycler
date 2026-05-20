@@ -34,6 +34,8 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     ...(options.contextIndexStoreFactory ? { storeFactory: options.contextIndexStoreFactory } : {})
   });
 
+  const dashboardUrl = process.env.SIGNAL_RECYCLER_DASHBOARD_URL ?? "http://127.0.0.1:5173";
+
   const app = Fastify({
     logger: process.env.SIGNAL_RECYCLER_LOG_LEVEL
       ? { level: process.env.SIGNAL_RECYCLER_LOG_LEVEL }
@@ -66,7 +68,9 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     }
   });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: [dashboardUrl, "http://localhost:5173"]
+  });
 
   app.addHook("onRequest", async (request) => {
     if (!request.url.startsWith("/proxy/")) return;
@@ -84,7 +88,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       workingDirectory,
       workingDirectoryBasename: path.basename(workingDirectory),
       availableAdapters: options.agentAdapterRegistry?.listAvailable() ?? ["default", "mock", "codex_sdk"],
-      dashboardUrl: process.env.SIGNAL_RECYCLER_DASHBOARD_URL ?? "http://127.0.0.1:5173",
+      dashboardUrl,
       database: {
         basename: databasePath ? path.basename(databasePath) : null,
         isSmoke: databasePath.includes("smoke")
