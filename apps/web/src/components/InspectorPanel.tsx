@@ -38,8 +38,8 @@ export function InspectorPanel({
 function EmptyInspector() {
   return (
     <section className="rounded-md border border-dashed border-stone-300 bg-stone-50 p-4 text-stone-500">
-      Select a session, timeline event, or memory candidate to inspect recorded metadata. No replay, diff, or
-      memory audit is loaded here until those backed features are implemented.
+      Select a session, timeline event, injected memory, or memory candidate to inspect recorded metadata. Replay
+      and diff remain disabled until backed execution artifacts exist.
     </section>
   );
 }
@@ -157,7 +157,7 @@ function MemoryInspector({ selection }: { selection: Extract<InspectorSelection,
         </dl>
       </section>
       <section className="rounded-md border border-dashed border-stone-300 bg-stone-50 p-4 text-stone-500">
-        This inspector shows the durable memory record properties. The Memory view usage panel shows recorded local
+        This inspector shows durable memory properties. The adjacent usage audit panel shows recorded local
         injection usage when it exists.
       </section>
     </>
