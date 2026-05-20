@@ -30,7 +30,7 @@ export function DashboardView({
   onOpenSession: (sessionId: string) => void;
   onOpenMemory: () => void;
 }) {
-  const metrics = buildDashboardMetrics({ sessions, events, memories });
+  const metrics = buildDashboardMetrics({ sessions, events, eventsBySession, memories });
   const recentSessions = [...sessions]
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, 5)

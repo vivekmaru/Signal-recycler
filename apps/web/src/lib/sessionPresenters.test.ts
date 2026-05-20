@@ -164,23 +164,33 @@ describe("session presenters", () => {
   });
 
   it("counts active sessions from lifecycle summaries", () => {
+    const events = [event({ id: "e1", category: "codex_event", title: "User prompt", metadata: { phase: "input" } })];
+    const eventsBySession = new Map();
+    eventsBySession.set("session_1", events);
+
     expect(
       buildDashboardMetrics({
         sessions: [session],
-        events: [event({ id: "e1", category: "codex_event", title: "User prompt", metadata: { phase: "input" } })],
+        events,
+        eventsBySession,
         memories: []
       }).activeSessions
     ).toBe(1);
   });
 
   it("counts source context retrieval and injection as dashboard context activity", () => {
+    const events = [
+      event({ id: "e1", category: "context_retrieval", title: "Retrieved context" }),
+      event({ id: "e2", category: "context_injection", title: "Injected context" })
+    ];
+    const eventsBySession = new Map();
+    eventsBySession.set("session_1", events);
+
     expect(
       buildDashboardMetrics({
         sessions: [session],
-        events: [
-          event({ id: "e1", category: "context_retrieval", title: "Retrieved context" }),
-          event({ id: "e2", category: "context_injection", title: "Injected context" })
-        ],
+        events,
+        eventsBySession,
         memories: []
       }).recentContextEvents
     ).toBe(2);
