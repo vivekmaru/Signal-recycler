@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import type { MemoryRecord, MemoryUsage } from "@signal-recycler/shared";
+import type { MemoryRecord } from "@signal-recycler/shared";
 import { approveRule, fetchMemoryAudit, rejectRule, type MemoryAuditResult } from "../api";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { Button } from "../components/Button";
 import { InspectorPanel } from "../components/InspectorPanel";
+import { MemoryAuditPanel } from "../components/MemoryAuditPanel";
 import { formatDateTime } from "../lib/format";
 import {
   confidenceValue,
@@ -173,7 +174,7 @@ export function MemoryView({
 
       <aside className="grid min-h-[560px] min-w-0 grid-rows-[minmax(0,1fr)_auto_auto] border-t border-stone-200 xl:border-t-0">
         <InspectorPanel selection={selection} />
-        <AuditPanel audit={audit} error={auditError} loading={auditLoading} selected={selected} />
+        <MemoryAuditPanel audit={audit} error={auditError} loading={auditLoading} selected={selected} />
         <div className="border-l border-t border-stone-200 bg-white p-3">
           {actionError ? (
             <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-800">{actionError}</div>
@@ -238,67 +239,6 @@ function MemoryTableRow({
         {memory.lastUsedAt ? formatDateTime(memory.lastUsedAt) : "never"}
       </span>
     </button>
-  );
-}
-
-function AuditPanel({
-  selected,
-  audit,
-  loading,
-  error
-}: {
-  selected: MemoryRecord | null;
-  audit: MemoryAuditResult | null;
-  loading: boolean;
-  error: string | null;
-}) {
-  return (
-    <section className="max-h-80 overflow-auto border-l border-t border-stone-200 bg-white p-4 text-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="font-semibold text-stone-950">Recorded usage audit</h2>
-          <p className="mt-1 text-xs text-stone-500">Injection usages recorded for this memory in the local project.</p>
-        </div>
-        {audit ? <Badge>{audit.usages.length} uses</Badge> : null}
-      </div>
-      {!selected ? <div className="text-stone-500">Select a memory record to inspect usage audit data.</div> : null}
-      {selected && loading ? <div className="text-stone-500">Loading audit data...</div> : null}
-      {selected && error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800">{error}</div>
-      ) : null}
-      {selected && !loading && !error && audit ? <UsageList usages={audit.usages} /> : null}
-    </section>
-  );
-}
-
-function UsageList({ usages }: { usages: MemoryUsage[] }) {
-  if (usages.length === 0) {
-    return (
-      <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 p-3 text-xs text-stone-500">
-        No memory injection usage has been recorded for this memory.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      {usages.map((usage) => (
-        <div className="rounded-md border border-stone-200 bg-stone-50 p-3" key={usage.id}>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="blue">{usage.adapter}</Badge>
-            <span className="font-mono text-xs text-stone-500">{formatDateTime(usage.injectedAt)}</span>
-          </div>
-          <dl className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] gap-2 text-xs">
-            <dt className="text-stone-500">Reason</dt>
-            <dd className="truncate text-stone-800">{usage.reason}</dd>
-            <dt className="text-stone-500">Session</dt>
-            <dd className="truncate font-mono text-stone-800">{usage.sessionId}</dd>
-            <dt className="text-stone-500">Event</dt>
-            <dd className="truncate font-mono text-stone-800">{usage.eventId}</dd>
-          </dl>
-        </div>
-      ))}
-    </div>
   );
 }
 

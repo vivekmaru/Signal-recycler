@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GitCompare, OctagonX, RotateCcw, Search } from "lucide-react";
 import type { AgentAdapter, MemoryRecord, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
-import type { MemoryRetrievalPreview } from "../api";
-import { previewMemoryRetrieval } from "../api";
+import type { MemoryAuditResult, MemoryRetrievalPreview } from "../api";
+import { fetchMemoryAudit, previewMemoryRetrieval } from "../api";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { Button } from "../components/Button";
 import { InspectorPanel } from "../components/InspectorPanel";
+import { MemoryAuditPanel } from "../components/MemoryAuditPanel";
 import { MetricTile } from "../components/MetricTile";
 import { Timeline } from "../components/Timeline";
 import { groupCandidateEvents, type CandidateEventGroup } from "../lib/eventPresenters";
@@ -56,6 +57,9 @@ export function SessionDetailView({
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const [inspectorMode, setInspectorMode] = useState<"event" | "memory" | "session">("event");
   const [tab, setTab] = useState<SessionTab>("timeline");
+  const [memoryAudit, setMemoryAudit] = useState<MemoryAuditResult | null>(null);
+  const [memoryAuditLoading, setMemoryAuditLoading] = useState(false);
+  const [memoryAuditError, setMemoryAuditError] = useState<string | null>(null);
 
   useEffect(() => {
     if (events.length === 0) {
@@ -74,6 +78,7 @@ export function SessionDetailView({
   const sdkSummary = useMemo(() => summarizeSdkSession(events), [events]);
   const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
   const selectedMemory = memories.find((memory) => memory.id === selectedMemoryId) ?? null;
+  const selectedMemoryIdForAudit = inspectorMode === "memory" ? (selectedMemory?.id ?? null) : null;
   const retrievalEvents = events.filter((event) => event.category === "memory_retrieval" || event.category === "context_retrieval");
   const injectionEvents = events.filter((event) => event.category === "memory_injection");
   const contextEvents = events.filter((event) => contextCategories.has(event.category));
@@ -87,6 +92,40 @@ export function SessionDetailView({
         : session
           ? { type: "session", session }
           : { type: "empty" };
+
+  useEffect(() => {
+    if (!selectedMemoryIdForAudit) {
+      setMemoryAudit(null);
+      setMemoryAuditError(null);
+      setMemoryAuditLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setMemoryAudit(null);
+    setMemoryAuditError(null);
+    setMemoryAuditLoading(true);
+
+    fetchMemoryAudit(selectedMemoryIdForAudit)
+      .then((result) => {
+        if (!cancelled) setMemoryAudit(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setMemoryAuditError(errorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setMemoryAuditLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMemoryIdForAudit]);
+
+  function selectMemory(memoryId: string) {
+    setSelectedMemoryId(memoryId);
+    setInspectorMode("memory");
+  }
 
   if (!session || !summary) {
     return (
@@ -232,12 +271,14 @@ export function SessionDetailView({
           {tab === "context" ? (
             <ContextEnvelopePreview
               events={contextEvents}
+              memories={memories}
               onOpenContextChunk={onOpenContextChunk}
               onSelectEvent={(event) => {
                 setSelectedEventId(event.id);
                 setSelectedMemoryId(null);
                 setInspectorMode("event");
               }}
+              onSelectMemory={selectMemory}
             />
           ) : null}
           {tab === "diff" ? (
@@ -256,13 +297,20 @@ export function SessionDetailView({
                 setInspectorMode("event");
               }}
               onSelectMemory={(memoryId) => {
-                setSelectedMemoryId(memoryId);
-                setInspectorMode("memory");
+                selectMemory(memoryId);
               }}
             />
           ) : null}
         </section>
-        <InspectorPanel selection={selection} />
+        <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto]">
+          <InspectorPanel selection={selection} />
+          <MemoryAuditPanel
+            audit={memoryAudit}
+            error={memoryAuditError}
+            loading={memoryAuditLoading}
+            selected={selectedMemoryIdForAudit ? selectedMemory : null}
+          />
+        </div>
       </div>
     </div>
   );
@@ -544,12 +592,16 @@ function PreviewDecisionList({
 
 function ContextEnvelopePreview({
   events,
+  memories,
   onOpenContextChunk,
-  onSelectEvent
+  onSelectEvent,
+  onSelectMemory
 }: {
   events: TimelineEvent[];
+  memories: MemoryRecord[];
   onOpenContextChunk: (chunkId: string) => void;
   onSelectEvent: (event: TimelineEvent) => void;
+  onSelectMemory: (memoryId: string) => void;
 }) {
   if (events.length === 0) {
     return (
@@ -559,6 +611,8 @@ function ContextEnvelopePreview({
       />
     );
   }
+
+  const selectableMemoryIds = new Set(memories.map((memory) => memory.id));
 
   return (
     <div className="space-y-3">
@@ -579,7 +633,12 @@ function ContextEnvelopePreview({
             <p className="mt-2 text-stone-600">{event.body || "No event body recorded."}</p>
           </button>
           <div className="px-4 pb-4">
-            <ContextMetadata event={event} onOpenContextChunk={onOpenContextChunk} />
+            <ContextMetadata
+              event={event}
+              selectableMemoryIds={selectableMemoryIds}
+              onOpenContextChunk={onOpenContextChunk}
+              onSelectMemory={onSelectMemory}
+            />
           </div>
         </article>
       ))}
@@ -589,10 +648,14 @@ function ContextEnvelopePreview({
 
 function ContextMetadata({
   event,
-  onOpenContextChunk
+  selectableMemoryIds,
+  onOpenContextChunk,
+  onSelectMemory
 }: {
   event: TimelineEvent;
+  selectableMemoryIds: Set<string>;
   onOpenContextChunk: (chunkId: string) => void;
+  onSelectMemory: (memoryId: string) => void;
 }) {
   if (event.category === "memory_retrieval") {
     const selected = metadataRecords(event.metadata["selected"]);
@@ -606,8 +669,18 @@ function ContextMetadata({
           <MetadataBlock label="Skipped" value={String(skipped.length)} />
           <MetadataBlock label="Limit" value={metadataScalar(metrics["limit"]) ?? "unknown"} />
         </div>
-        <RetrievalDecisionList label="Selected memory" records={selected} />
-        <RetrievalDecisionList label="Skipped memory" records={skipped} />
+        <RetrievalDecisionList
+          label="Selected memory"
+          records={selected}
+          selectableMemoryIds={selectableMemoryIds}
+          onSelectMemory={onSelectMemory}
+        />
+        <RetrievalDecisionList
+          label="Skipped memory"
+          records={skipped}
+          selectableMemoryIds={selectableMemoryIds}
+          onSelectMemory={onSelectMemory}
+        />
       </div>
     );
   }
@@ -637,7 +710,14 @@ function ContextMetadata({
         {memoryIds.length === 0 ? (
           <span className="text-xs text-stone-500">No memory IDs recorded.</span>
         ) : (
-          memoryIds.map((id) => <Badge key={id}>{id}</Badge>)
+          memoryIds.map((id) => (
+            <MemoryIdButton
+              key={id}
+              memoryId={id}
+              selectable={selectableMemoryIds.has(id)}
+              onSelectMemory={onSelectMemory}
+            />
+          ))
         )}
       </div>
     );
@@ -762,11 +842,15 @@ function MetadataBlock({ label, value }: { label: string; value: string }) {
 function RetrievalDecisionList({
   label,
   records,
-  onOpenContextChunk
+  selectableMemoryIds,
+  onOpenContextChunk,
+  onSelectMemory
 }: {
   label: string;
   records: Array<Record<string, unknown>>;
+  selectableMemoryIds?: Set<string>;
   onOpenContextChunk?: (chunkId: string) => void;
+  onSelectMemory?: (memoryId: string) => void;
 }) {
   if (records.length === 0) return null;
 
@@ -779,6 +863,16 @@ function RetrievalDecisionList({
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {(() => {
                 const contextChunkId = metadataScalar(record["chunkId"]) ?? metadataScalar(record["id"]);
+                const memoryId = metadataScalar(record["memoryId"]);
+                if (memoryId) {
+                  return (
+                    <MemoryIdButton
+                      memoryId={memoryId}
+                      selectable={Boolean(selectableMemoryIds?.has(memoryId) && onSelectMemory)}
+                      onSelectMemory={onSelectMemory ?? (() => undefined)}
+                    />
+                  );
+                }
                 return contextChunkId && onOpenContextChunk ? (
                   <button
                     className="font-mono font-semibold text-amber-700 underline decoration-amber-300 underline-offset-2 hover:text-amber-900"
@@ -792,7 +886,7 @@ function RetrievalDecisionList({
                   </button>
                 ) : (
                   <span className="font-mono font-semibold text-stone-900">
-                    {metadataScalar(record["memoryId"]) ?? contextChunkId ?? "unknown"}
+                    {contextChunkId ?? "unknown"}
                   </span>
                 );
               })()}
@@ -819,6 +913,31 @@ function RetrievalDecisionList({
         ))}
       </div>
     </div>
+  );
+}
+
+function MemoryIdButton({
+  memoryId,
+  selectable,
+  onSelectMemory
+}: {
+  memoryId: string;
+  selectable: boolean;
+  onSelectMemory: (memoryId: string) => void;
+}) {
+  if (!selectable) return <Badge>{memoryId}</Badge>;
+
+  return (
+    <button
+      className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-xs font-semibold text-amber-800 hover:border-amber-300 hover:bg-amber-100"
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelectMemory(memoryId);
+      }}
+      type="button"
+    >
+      {memoryId}
+    </button>
   );
 }
 
