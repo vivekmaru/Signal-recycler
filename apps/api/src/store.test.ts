@@ -295,6 +295,41 @@ describe("store", () => {
     expect(rejected.updatedAt).toBe("2026-01-01T00:00:02.000Z");
   });
 
+  it("does not approve or reject superseded memory", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const store = createStore(":memory:");
+    const oldMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const newMemory = store.approveRule(
+      store.createRuleCandidate({
+        projectId: "demo",
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Corrected instruction."
+      }).id
+    );
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:01.000Z"));
+    const superseded = store.supersedeRule(oldMemory.id, newMemory.id);
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:02.000Z"));
+    expect(() => store.approveRule(oldMemory.id)).toThrow(`Rule is superseded: ${oldMemory.id}`);
+    expect(() => store.rejectRule(oldMemory.id)).toThrow(`Rule is superseded: ${oldMemory.id}`);
+    expect(store.getRule(oldMemory.id)).toMatchObject({
+      status: "approved",
+      approvedAt: oldMemory.approvedAt,
+      supersededBy: newMemory.id,
+      updatedAt: superseded.updatedAt
+    });
+  });
+
   it("records memory usages and updates last used timestamp", () => {
     const store = createStore(":memory:");
     const memory = store.approveRule(

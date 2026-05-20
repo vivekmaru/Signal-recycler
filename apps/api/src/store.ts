@@ -260,6 +260,9 @@ export function createStore(path: string) {
     },
 
     approveRule(id: string): PlaybookRule {
+      const existing = this.getRule(id);
+      if (!existing) throw new Error(`Rule not found: ${id}`);
+      if (existing.supersededBy) throw new Error(`Rule is superseded: ${id}`);
       const approvedAt = now();
       db.prepare(
         "UPDATE rules SET status = 'approved', approved_at = ?, updated_at = ? WHERE id = ?"
@@ -271,6 +274,9 @@ export function createStore(path: string) {
     },
 
     rejectRule(id: string): PlaybookRule {
+      const existing = this.getRule(id);
+      if (!existing) throw new Error(`Rule not found: ${id}`);
+      if (existing.supersededBy) throw new Error(`Rule is superseded: ${id}`);
       const updatedAt = now();
       db.prepare(
         "UPDATE rules SET status = 'rejected', approved_at = NULL, updated_at = ? WHERE id = ?"
