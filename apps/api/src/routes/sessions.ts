@@ -94,19 +94,26 @@ export async function registerSessionRoutes(
     if (!session || session.projectId !== projectId) {
       return reply.code(404).send({ error: "Session not found" });
     }
-    const events = options.store.listEvents(id);
     if (request.headers.accept?.includes("text/event-stream")) {
+      reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive"
       });
-      for (const event of events) {
+      const writtenEventIds = new Set<string>();
+      const writeEvent = (event: ReturnType<typeof options.store.listEvents>[number]) => {
+        if (writtenEventIds.has(event.id)) return;
+        writtenEventIds.add(event.id);
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      const unsubscribe = options.store.subscribeToSessionEvents(id, writeEvent);
+      request.raw.on("close", unsubscribe);
+      for (const event of options.store.listEvents(id)) {
+        writeEvent(event);
       }
-      reply.raw.end();
       return reply;
     }
-    return events;
+    return options.store.listEvents(id);
   });
 }
