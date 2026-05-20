@@ -150,6 +150,13 @@ export async function registerRuleRoutes(
     if (!rule || rule.projectId !== projectId) {
       return reply.code(404).send({ error: "Rule not found" });
     }
+    if (rule.supersededBy) {
+      return reply.code(409).send({
+        error: "Rule is superseded",
+        message: "Superseded rules cannot be approved.",
+        supersededBy: rule.supersededBy
+      });
+    }
     return options.store.approveRule(id);
   });
 
@@ -158,6 +165,13 @@ export async function registerRuleRoutes(
     const rule = options.store.getRule(id);
     if (!rule || rule.projectId !== projectId) {
       return reply.code(404).send({ error: "Rule not found" });
+    }
+    if (rule.supersededBy) {
+      return reply.code(409).send({
+        error: "Rule is superseded",
+        message: "Superseded rules cannot be rejected.",
+        supersededBy: rule.supersededBy
+      });
     }
     return options.store.rejectRule(id);
   });

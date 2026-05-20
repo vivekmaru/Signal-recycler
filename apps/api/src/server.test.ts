@@ -1181,6 +1181,62 @@ describe("api", () => {
     expect(store.getRule(otherRule.id)?.status).toBe("pending");
   });
 
+  it("does not approve or reject superseded rules", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const oldRule = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use npm for package management.",
+        reason: "Old instruction."
+      }).id
+    );
+    const newRule = store.approveRule(
+      store.createRuleCandidate({
+        projectId: TEST_APP_OPTIONS.projectId,
+        category: "package-manager",
+        rule: "Use pnpm for package management.",
+        reason: "Corrected instruction."
+      }).id
+    );
+    const superseded = store.supersedeRule(oldRule.id, newRule.id);
+
+    const approve = await app.inject({
+      method: "POST",
+      url: `/api/rules/${oldRule.id}/approve`
+    });
+    const reject = await app.inject({
+      method: "POST",
+      url: `/api/rules/${oldRule.id}/reject`
+    });
+
+    expect(approve.statusCode).toBe(409);
+    expect(approve.json()).toMatchObject({
+      error: "Rule is superseded",
+      message: "Superseded rules cannot be approved.",
+      supersededBy: newRule.id
+    });
+    expect(reject.statusCode).toBe(409);
+    expect(reject.json()).toMatchObject({
+      error: "Rule is superseded",
+      message: "Superseded rules cannot be rejected.",
+      supersededBy: newRule.id
+    });
+    expect(store.getRule(oldRule.id)).toMatchObject({
+      status: "approved",
+      approvedAt: oldRule.approvedAt,
+      supersededBy: newRule.id,
+      updatedAt: superseded.updatedAt
+    });
+  });
+
   it("returns a clear gateway error when the Codex runner fails", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
