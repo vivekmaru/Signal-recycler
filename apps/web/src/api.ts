@@ -112,7 +112,12 @@ export async function createManualRule(input: {
 }
 
 export async function listEvents(sessionId: string): Promise<TimelineEvent[]> {
-  return readJson(await fetch(`/api/sessions/${sessionId}/events`));
+  return readJson(await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/events`));
+}
+
+export function openSessionEventStream(sessionId: string): EventSource | null {
+  if (typeof EventSource === "undefined") return null;
+  return new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/events`);
 }
 
 export async function listFirehose(limit = 100): Promise<TimelineEvent[]> {

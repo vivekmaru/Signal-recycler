@@ -297,6 +297,58 @@ describe("api", () => {
     expect(run.json()).toMatchObject({ error: "Session not found" });
   });
 
+  it("streams future session events over SSE until the client disconnects", async () => {
+    const store = createStore(":memory:");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      store,
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+    const session = store.createSession({
+      projectId: TEST_APP_OPTIONS.projectId,
+      title: "Live SSE"
+    });
+    store.createEvent({
+      sessionId: session.id,
+      category: "codex_event",
+      title: "Initial event",
+      body: "Visible in the initial SSE snapshot"
+    });
+
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected app server address");
+    const controller = new AbortController();
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/sessions/${session.id}/events`,
+        {
+          headers: { Accept: "text/event-stream" },
+          signal: controller.signal
+        }
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+
+      const readTitles = waitForSseTitles(response, ["Initial event", "Future event"]);
+      store.createEvent({
+        sessionId: session.id,
+        category: "codex_event",
+        title: "Future event",
+        body: "Delivered after the SSE response was already open"
+      });
+
+      await expect(readTitles).resolves.toEqual(["Initial event", "Future event"]);
+    } finally {
+      controller.abort();
+      await app.close();
+    }
+  });
+
   it("creates rule candidates during a run and emits ordered events", async () => {
     const store = createStore(":memory:");
     const app = await createApp({
@@ -2791,3 +2843,39 @@ describe("api", () => {
     }
   });
 });
+
+async function waitForSseTitles(response: Response, expectedTitles: string[]): Promise<string[]> {
+  if (!response.body) throw new Error("Expected SSE response body");
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  const titles: string[] = [];
+  let buffer = "";
+
+  const readUntilExpected = async () => {
+    while (!expectedTitles.every((title) => titles.includes(title))) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`SSE stream ended before ${expectedTitles.join(", ")}`);
+      buffer += decoder.decode(value, { stream: true });
+
+      let delimiterIndex = buffer.indexOf("\n\n");
+      while (delimiterIndex >= 0) {
+        const frame = buffer.slice(0, delimiterIndex);
+        buffer = buffer.slice(delimiterIndex + 2);
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+        if (dataLine) {
+          const event = JSON.parse(dataLine.slice("data: ".length)) as { title: string };
+          titles.push(event.title);
+        }
+        delimiterIndex = buffer.indexOf("\n\n");
+      }
+    }
+    return titles.filter((title) => expectedTitles.includes(title));
+  };
+
+  return Promise.race([
+    readUntilExpected(),
+    new Promise<string[]>((_, reject) => {
+      setTimeout(() => reject(new Error(`Timed out waiting for ${expectedTitles.join(", ")}`)), 1000);
+    })
+  ]);
+}

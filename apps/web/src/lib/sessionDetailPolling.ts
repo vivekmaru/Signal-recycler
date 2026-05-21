@@ -11,6 +11,17 @@ export function sessionDetailPollInterval(input: {
     : IDLE_SESSION_DETAIL_POLL_INTERVAL_MS;
 }
 
+export type SessionDetailSyncMode = "stream" | "poll" | "off";
+
+export function sessionDetailSyncMode(input: {
+  hasSelectedSession: boolean;
+  eventSourceAvailable: boolean;
+  streamFailed: boolean;
+}): SessionDetailSyncMode {
+  if (!input.hasSelectedSession) return "off";
+  return input.eventSourceAvailable && !input.streamFailed ? "stream" : "poll";
+}
+
 export function isSessionDetailRunActive(input: {
   selectedSessionId: string | null;
   continuedSessionRunning: boolean;

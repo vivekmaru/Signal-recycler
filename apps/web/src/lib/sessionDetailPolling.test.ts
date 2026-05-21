@@ -3,6 +3,7 @@ import {
   ACTIVE_SESSION_DETAIL_POLL_INTERVAL_MS,
   IDLE_SESSION_DETAIL_POLL_INTERVAL_MS,
   isSessionDetailRunActive,
+  sessionDetailSyncMode,
   sessionDetailPollInterval
 } from "./sessionDetailPolling";
 
@@ -21,6 +22,43 @@ describe("session detail polling", () => {
     expect(sessionDetailPollInterval({ hasSelectedSession: true, runActive: false })).toBe(
       IDLE_SESSION_DETAIL_POLL_INTERVAL_MS
     );
+  });
+
+  it("prefers the event stream when EventSource is available and healthy", () => {
+    expect(
+      sessionDetailSyncMode({
+        hasSelectedSession: true,
+        eventSourceAvailable: true,
+        streamFailed: false
+      })
+    ).toBe("stream");
+  });
+
+  it("falls back to polling when event streaming is unavailable or failed", () => {
+    expect(
+      sessionDetailSyncMode({
+        hasSelectedSession: true,
+        eventSourceAvailable: false,
+        streamFailed: false
+      })
+    ).toBe("poll");
+    expect(
+      sessionDetailSyncMode({
+        hasSelectedSession: true,
+        eventSourceAvailable: true,
+        streamFailed: true
+      })
+    ).toBe("poll");
+  });
+
+  it("does not poll or stream without a selected session", () => {
+    expect(
+      sessionDetailSyncMode({
+        hasSelectedSession: false,
+        eventSourceAvailable: true,
+        streamFailed: false
+      })
+    ).toBe("off");
   });
 
   it("treats continued runs as active for the selected detail session", () => {

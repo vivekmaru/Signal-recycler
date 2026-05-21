@@ -61,6 +61,8 @@ type RecordMemoryInjectionEventInput = {
   usages: Array<Omit<RecordMemoryUsageInput, "eventId">>;
 };
 
+type SessionEventListener = (event: TimelineEvent) => void;
+
 type SearchApprovedMemoriesInput = {
   projectId: string;
   query: string;
@@ -77,6 +79,7 @@ export type SignalRecyclerStore = ReturnType<typeof createStore>;
 
 export function createStore(path: string) {
   const db = new DatabaseSync(path);
+  const sessionEventSubscribers = new Map<string, Set<SessionEventListener>>();
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -179,7 +182,21 @@ export function createStore(path: string) {
         JSON.stringify(event.metadata),
         event.createdAt
       );
+      for (const listener of sessionEventSubscribers.get(event.sessionId) ?? []) {
+        listener(event);
+      }
       return event;
+    },
+
+    subscribeToSessionEvents(sessionId: string, listener: SessionEventListener): () => void {
+      const listeners = sessionEventSubscribers.get(sessionId) ?? new Set<SessionEventListener>();
+      listeners.add(listener);
+      sessionEventSubscribers.set(sessionId, listeners);
+
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) sessionEventSubscribers.delete(sessionId);
+      };
     },
 
     listEvents(sessionId: string): TimelineEvent[] {

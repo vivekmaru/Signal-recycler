@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AgentAdapter, SessionRecord, TimelineEvent } from "@signal-recycler/shared";
-import { createSession, listEvents, runSession } from "./api";
+import { createSession, listEvents, openSessionEventStream, runSession } from "./api";
 import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { useDashboardData } from "./hooks/useDashboardData";
 import { parseAppLocation, pathForRoute } from "./lib/routes";
-import { isSessionDetailRunActive, sessionDetailPollInterval } from "./lib/sessionDetailPolling";
+import {
+  isSessionDetailRunActive,
+  sessionDetailPollInterval,
+  sessionDetailSyncMode
+} from "./lib/sessionDetailPolling";
 import { runAdapterOptions } from "./lib/sessionRunPresenters";
 import { buildDashboardMetrics } from "./lib/sessionPresenters";
 import type { AppRoute } from "./types";
@@ -32,6 +36,7 @@ export function App() {
   const [sessionDetailError, setSessionDetailError] = useState<string | null>(null);
   const [sessionDetailLoadedSessionId, setSessionDetailLoadedSessionId] = useState<string | null>(null);
   const [sessionDetailReloadKey, setSessionDetailReloadKey] = useState(0);
+  const [sessionDetailStreamFailed, setSessionDetailStreamFailed] = useState(false);
   const [sessionRunRunning, setSessionRunRunning] = useState(false);
   const [sessionRunSessionId, setSessionRunSessionId] = useState<string | null>(null);
   const [sessionRunError, setSessionRunError] = useState<string | null>(null);
@@ -137,6 +142,11 @@ export function App() {
     hasSelectedSession: Boolean(selectedSessionIdForDetail),
     runActive: sessionDetailRunActive
   });
+  const sessionDetailSync = sessionDetailSyncMode({
+    hasSelectedSession: Boolean(selectedSessionIdForDetail),
+    eventSourceAvailable: typeof EventSource !== "undefined",
+    streamFailed: sessionDetailStreamFailed
+  });
   const sessionDetailRunError =
     sessionRunErrorSessionId === selectedSessionIdForDetail ? sessionRunError : null;
   useEffect(() => {
@@ -150,12 +160,13 @@ export function App() {
 
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let eventSource: EventSource | null = null;
     const sessionId = selectedSessionIdForDetail;
     let initialFetchSettled = sessionDetailLoadedSessionId === sessionId;
     let hasLoadedSelectedSession = sessionDetailLoadedSessionId === sessionId;
     setSessionDetailError(null);
 
-    async function pollEvents() {
+    async function loadEvents() {
       if (!initialFetchSettled) setSessionDetailLoading(true);
       try {
         const events = await listEvents(sessionId);
@@ -173,7 +184,10 @@ export function App() {
       } finally {
         if (!cancelled) setSessionDetailLoading(false);
       }
+    }
 
+    async function pollEvents() {
+      await loadEvents();
       if (!cancelled && sessionDetailPollMs !== null) {
         timeout = setTimeout(() => {
           void pollEvents();
@@ -181,18 +195,47 @@ export function App() {
       }
     }
 
-    void pollEvents();
+    if (sessionDetailSync === "stream") {
+      void (async () => {
+        await loadEvents();
+        if (cancelled) return;
+        eventSource = openSessionEventStream(sessionId);
+        if (!eventSource) {
+          setSessionDetailStreamFailed(true);
+          return;
+        }
+        eventSource.onmessage = (message) => {
+          if (cancelled) return;
+          const event = JSON.parse(message.data) as TimelineEvent;
+          setSessionDetailEvents((currentEvents) => upsertTimelineEvent(currentEvents, event));
+          setSessionDetailError(null);
+          setSessionDetailLoadedSessionId(sessionId);
+          initialFetchSettled = true;
+          hasLoadedSelectedSession = true;
+          setSessionDetailLoading(false);
+        };
+        eventSource.onerror = () => {
+          if (cancelled) return;
+          eventSource?.close();
+          setSessionDetailStreamFailed(true);
+        };
+      })();
+    } else if (sessionDetailSync === "poll") {
+      void pollEvents();
+    }
 
     return () => {
       cancelled = true;
       if (timeout) clearTimeout(timeout);
+      eventSource?.close();
     };
-  }, [selectedSessionIdForDetail, sessionDetailPollMs, sessionDetailReloadKey]);
+  }, [selectedSessionIdForDetail, sessionDetailPollMs, sessionDetailReloadKey, sessionDetailSync]);
 
   useEffect(() => {
     setSessionDetailEvents([]);
     setSessionDetailError(null);
     setSessionDetailLoadedSessionId(null);
+    setSessionDetailStreamFailed(false);
     setSessionDetailLoading(Boolean(selectedSessionIdForDetail));
   }, [selectedSessionIdForDetail]);
 
@@ -259,7 +302,10 @@ export function App() {
                 memories={data.memories}
                 onBack={() => navigate("sessions")}
                 onRunPrompt={handleContinueSession}
-                onRetryEvents={() => setSessionDetailReloadKey((key) => key + 1)}
+                onRetryEvents={() => {
+                  setSessionDetailStreamFailed(false);
+                  setSessionDetailReloadKey((key) => key + 1);
+                }}
                 onOpenContextChunk={(chunkId) => navigate("context", null, chunkId)}
                 runError={sessionDetailRunError}
                 runRunning={sessionDetailRunActive}
@@ -292,6 +338,16 @@ export function App() {
       ) : null}
     </AppShell>
   );
+}
+
+function upsertTimelineEvent(events: TimelineEvent[], nextEvent: TimelineEvent): TimelineEvent[] {
+  const existingIndex = events.findIndex((event) => event.id === nextEvent.id);
+  if (existingIndex >= 0) {
+    const nextEvents = [...events];
+    nextEvents[existingIndex] = nextEvent;
+    return nextEvents;
+  }
+  return [...events, nextEvent];
 }
 
 function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
