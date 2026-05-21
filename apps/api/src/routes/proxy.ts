@@ -27,7 +27,20 @@ export async function registerProxyRoutes(
       options.upstreamBaseUrl ??
       process.env.SIGNAL_RECYCLER_UPSTREAM_URL ??
       "https://api.openai.com";
-    const upstreamUrl = `${upstreamBaseUrl.replace(/\/$/, "")}${tail}`;
+    let upstreamUrl: string;
+    try {
+      const parsedBase = new URL(upstreamBaseUrl);
+      const rawUrl = `${upstreamBaseUrl.replace(/\/$/, "")}${tail}`;
+      const parsedUrl = new URL(rawUrl);
+      if (parsedUrl.origin !== parsedBase.origin) {
+        request.log.warn({ tail, upstreamBaseUrl }, "SSRF attempt blocked: origin mismatch");
+        return reply.code(400).send({ error: "Invalid proxy URL" });
+      }
+      upstreamUrl = parsedUrl.toString();
+    } catch {
+      request.log.warn({ tail, upstreamBaseUrl }, "SSRF attempt blocked: invalid URL");
+      return reply.code(400).send({ error: "Invalid proxy URL" });
+    }
 
     const originalSize = sizeOf(request.body);
     const originalItems = countInputItems(request.body);
