@@ -49,11 +49,22 @@ export function summarizeSession(
 export function buildDashboardMetrics(input: {
   sessions: SessionRecord[];
   events: TimelineEvent[];
+  eventsBySession?: Map<string, TimelineEvent[]>;
   memories: MemoryRecord[];
 }) {
+  let eventsBySession = input.eventsBySession;
+  if (!eventsBySession) {
+    eventsBySession = new Map<string, TimelineEvent[]>();
+    for (const event of input.events) {
+      const group = eventsBySession.get(event.sessionId);
+      if (group) group.push(event);
+      else eventsBySession.set(event.sessionId, [event]);
+    }
+  }
+
   return {
     activeSessions: input.sessions.filter(
-      (session) => summarizeSession(session, input.events, input.memories).status === "running"
+      (session) => summarizeSession(session, eventsBySession.get(session.id) ?? [], input.memories).status === "running"
     ).length,
     approvedMemory: input.memories.filter((memory) => memory.status === "approved" && !memory.supersededBy).length,
     pendingMemory: input.memories.filter((memory) => memory.status === "pending").length,
