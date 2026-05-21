@@ -70,6 +70,122 @@ describe("api", () => {
     });
   });
 
+  it("returns the latest local eval report summary", async () => {
+    const evalReportDir = mkdtempSync(join(tmpdir(), "signal-recycler-eval-report-"));
+    writeFileSync(
+      join(evalReportDir, "latest.json"),
+      JSON.stringify({
+        generatedAt: "2026-05-20T01:02:03.000Z",
+        mode: "local",
+        status: "pass",
+        metrics: [{ name: "context_index_recall_at_5", value: 1, unit: "ratio" }],
+        suites: [
+          {
+            id: "context-index",
+            title: "Context Index Retrieval",
+            status: "pass",
+            metrics: [{ name: "context_index_precision_at_5", value: 1, unit: "ratio" }],
+            cases: [
+              {
+                id: "context-index.auth-middleware-source",
+                title: "Auth middleware source is retrieved",
+                status: "pass",
+                summary: "recall@5=1, precision@5=1",
+                details: { selectedPaths: ["apps/web/src/middleware.ts"] }
+              }
+            ]
+          }
+        ]
+      }),
+      "utf8"
+    );
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      evalReportDir,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/evals/report" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      available: true,
+      generatedAt: "2026-05-20T01:02:03.000Z",
+      mode: "local",
+      status: "pass",
+      reportPath: join(evalReportDir, "latest.json"),
+      markdownPath: join(evalReportDir, "latest.md"),
+      metrics: [{ name: "context_index_recall_at_5", value: 1, unit: "ratio" }],
+      suites: [
+        {
+          id: "context-index",
+          title: "Context Index Retrieval",
+          status: "pass",
+          metrics: [{ name: "context_index_precision_at_5", value: 1, unit: "ratio" }],
+          cases: [
+            {
+              id: "context-index.auth-middleware-source",
+              title: "Auth middleware source is retrieved",
+              status: "pass",
+              summary: "recall@5=1, precision@5=1"
+            }
+          ]
+        }
+      ]
+    });
+    expect(response.json().suites[0].cases[0]).not.toHaveProperty("details");
+  });
+
+  it("returns an honest empty eval report state when no local report exists", async () => {
+    const evalReportDir = mkdtempSync(join(tmpdir(), "signal-recycler-missing-eval-report-"));
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      evalReportDir,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/evals/report" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      available: false,
+      generatedAt: null,
+      mode: null,
+      status: null,
+      reportPath: join(evalReportDir, "latest.json"),
+      markdownPath: join(evalReportDir, "latest.md"),
+      suites: [],
+      metrics: []
+    });
+  });
+
+  it("returns a validation error for unreadable eval report JSON", async () => {
+    const evalReportDir = mkdtempSync(join(tmpdir(), "signal-recycler-invalid-eval-report-"));
+    writeFileSync(join(evalReportDir, "latest.json"), "{not-json", "utf8");
+    const app = await createApp({
+      ...TEST_APP_OPTIONS,
+      evalReportDir,
+      store: createStore(":memory:"),
+      codexRunner: {
+        run: async () => ({ finalResponse: "ok", items: [] })
+      }
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/evals/report" });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({
+      error: "Invalid eval report",
+      reportPath: join(evalReportDir, "latest.json")
+    });
+  });
+
   it("returns recent events through the firehose endpoint", async () => {
     const store = createStore(":memory:");
     const app = await createApp({

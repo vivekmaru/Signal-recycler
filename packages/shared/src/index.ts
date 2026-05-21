@@ -245,6 +245,61 @@ export const contextRetrievalResultSchema = z.object({
 });
 export type ContextRetrievalResult = z.infer<typeof contextRetrievalResultSchema>;
 
+export const evalStatusSchema = z.enum(["pass", "fail", "warn", "skip"]);
+export type EvalStatus = z.infer<typeof evalStatusSchema>;
+
+export const evalMetricSchema = z.object({
+  name: z.string().min(1),
+  value: z.number(),
+  unit: z.string().min(1).optional()
+});
+export type EvalMetric = z.infer<typeof evalMetricSchema>;
+
+export const evalCaseResultSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: evalStatusSchema,
+  summary: z.string(),
+  metrics: z.array(evalMetricSchema).optional(),
+  details: z.record(z.string(), z.unknown()).optional()
+});
+export type EvalCaseResult = z.infer<typeof evalCaseResultSchema>;
+
+export const evalSuiteResultSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: evalStatusSchema,
+  cases: z.array(evalCaseResultSchema),
+  metrics: z.array(evalMetricSchema).optional()
+});
+export type EvalSuiteResult = z.infer<typeof evalSuiteResultSchema>;
+
+export const evalReportSchema = z.object({
+  generatedAt: z.string(),
+  mode: z.enum(["local", "live"]),
+  status: evalStatusSchema,
+  suites: z.array(evalSuiteResultSchema),
+  metrics: z.array(evalMetricSchema)
+});
+export type EvalReport = z.infer<typeof evalReportSchema>;
+
+export type EvalCaseSummary = Omit<EvalCaseResult, "details">;
+export type EvalSuiteSummary = Omit<EvalSuiteResult, "cases"> & {
+  cases: EvalCaseSummary[];
+  metrics: EvalMetric[];
+};
+
+export type EvalReportSummary = {
+  available: boolean;
+  generatedAt: string | null;
+  mode: EvalReport["mode"] | null;
+  status: EvalStatus | null;
+  reportPath: string;
+  markdownPath: string;
+  metrics: EvalMetric[];
+  suites: EvalSuiteSummary[];
+};
+
 export const ruleConfidenceSchema = memoryConfidenceSchema;
 export type RuleConfidence = MemoryConfidence;
 

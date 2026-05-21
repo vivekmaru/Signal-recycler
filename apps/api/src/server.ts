@@ -16,6 +16,8 @@ configureHttpRuntime();
 const port = Number(process.env.PORT ?? 3001);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dbPath = process.env.SIGNAL_RECYCLER_DB ?? path.join(repoRoot, "signal-recycler.sqlite");
+const evalReportDir =
+  process.env.SIGNAL_RECYCLER_EVAL_REPORT_DIR ?? path.join(repoRoot, ".signal-recycler/evals");
 
 // Which directory Codex should work in. Defaults to the repo root so Signal
 // Recycler can demo on itself — set SIGNAL_RECYCLER_WORKDIR to point at any
@@ -43,6 +45,7 @@ const app = await createApp({
   projectId,
   workingDirectory,
   databasePath: dbPath,
+  evalReportDir,
   codexRunner: codexSdkAdapter,
   agentAdapterRegistry
 });

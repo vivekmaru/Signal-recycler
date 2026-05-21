@@ -4,6 +4,7 @@ import type {
   ContextIndexStatus,
   ContextRetrievalRequest,
   ContextRetrievalResult,
+  EvalReportSummary,
   MemoryRecord,
   MemoryRetrievalResult,
   MemoryUsage,
@@ -96,6 +97,10 @@ export async function retrieveContextIndex(input: ContextRetrievalRequest): Prom
 
 export async function fetchContextChunk(chunkId: string): Promise<ContextChunk> {
   return readJson(await fetch(`/api/context-index/chunks/${encodeURIComponent(chunkId)}`));
+}
+
+export async function fetchEvalReport(): Promise<EvalReportSummary> {
+  return readJson(await fetch("/api/evals/report"));
 }
 
 export async function createManualRule(input: {
