@@ -1,0 +1,4 @@
+## 2023-10-27 - SSRF in Proxy Endpoint
+**Vulnerability:** A Server-Side Request Forgery (SSRF) vulnerability existed in `apps/api/src/routes/proxy.ts`. The proxy route constructed the target upstream URL via string concatenation (`${upstreamBaseUrl.replace(/\/$/, "")}${tail}`) without validating if the resulting URL's origin was strictly the same as the base upstream URL.
+**Learning:** URL string concatenation with unvalidated user input (like the path component of a proxy request) can trick URL parsers (e.g., using `@` or `//` or `http://`) into shifting the origin of the final URL to an attacker-controlled host.
+**Prevention:** Always use the `URL` constructor to compose or validate URLs from components, and explicitly verify that the composed URL's `.origin` strictly matches the intended `.origin`.
